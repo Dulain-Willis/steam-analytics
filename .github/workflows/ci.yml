@@ -27,7 +27,7 @@ jobs:
           cache: pip
 
       - name: install
-        run: pip install -r requirements-dev.txt
+        run: pip install -r requirements.txt
 
       - name: dbt deps
         run: dbt deps
