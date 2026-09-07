@@ -18,11 +18,25 @@ clean-targets:
   - "target"
   - "dbt_packages"
 
+# Schemas are the folder-derived names below, applied verbatim in every
+# environment by macros/generate_schema_name.sql.
 models:
   steam_analytics:
     staging:
       +materialized: view
+      +schema: stg
     intermediate:
       +materialized: view
+      +schema: int
     marts:
       +materialized: table
+      core:
+        +schema: marts_core
+      product:
+        +schema: marts_product
+      marketing:
+        +schema: marts_marketing
+      finance:
+        +schema: marts_finance
+  elementary:
+    +schema: elementary
