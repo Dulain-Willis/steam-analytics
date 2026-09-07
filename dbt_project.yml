@@ -1,0 +1,42 @@
+name: 'steam_analytics'
+version: '1.0.0'
+config-version: 2
+
+# The database is set per-target in profiles.yml (from the SNOWFLAKE_DATABASE
+# env var). Schemas are derived from folder structure by the
+# generate_schema_name macro in macros/.
+profile: 'steam_analytics'
+
+model-paths: ["models"]
+seed-paths: ["seeds"]
+macro-paths: ["macros"]
+test-paths: ["tests"]
+snapshot-paths: ["snapshots"]
+analysis-paths: ["analyses"]
+
+clean-targets:
+  - "target"
+  - "dbt_packages"
+
+# Schemas are the folder-derived names below, applied verbatim in every
+# environment by macros/generate_schema_name.sql.
+models:
+  steam_analytics:
+    staging:
+      +materialized: view
+      +schema: stg
+    intermediate:
+      +materialized: view
+      +schema: int
+    marts:
+      +materialized: table
+      core:
+        +schema: marts_core
+      product:
+        +schema: marts_product
+      marketing:
+        +schema: marts_marketing
+      finance:
+        +schema: marts_finance
+  elementary:
+    +schema: elementary

@@ -1,0 +1,69 @@
+# dbt profile — Snowflake, RSA key-pair auth only (no password secret).
+#
+# This file is project-local and safe to commit: every value resolves from an
+# env var at runtime. Nothing sensitive lives here, and the private key is
+# never in the repo (see .gitignore: *.p8 / *.pem).
+#
+# Select the target with DBT_TARGET (default: dev).
+#
+# Key material by context (auth plan — see issue #9 story 2, steam-infra #43):
+#   - local dev : developer generates their own PKCS#8 key, registers the
+#                 public half on their Snowflake user
+#                 (ALTER USER <u> SET RSA_PUBLIC_KEY=...), points
+#                 SNOWFLAKE_PRIVATE_KEY_PATH at the .p8 file.
+#   - ci        : key stored as a GitHub Actions secret, written to a temp
+#                 file by the workflow, SNOWFLAKE_PRIVATE_KEY_PATH points at it.
+#   - prod      : k8s Secret (RSA key-pair) mounted as a file into the
+#                 Cosmos/Airflow pod on steam-infra's EKS, mirroring
+#                 steam-infra #43's Secret pattern; SNOWFLAKE_PRIVATE_KEY_PATH
+#                 points at the mount path. Wired in Phase 11 (Orchestration).
+#
+# Required env vars (all targets):
+#   SNOWFLAKE_ACCOUNT, SNOWFLAKE_USER, SNOWFLAKE_DATABASE,
+#   SNOWFLAKE_PRIVATE_KEY_PATH
+# Optional:
+#   SNOWFLAKE_ROLE, SNOWFLAKE_WAREHOUSE, DBT_THREADS,
+#   DBT_ENV_SECRET_SNOWFLAKE_KEY_PASSPHRASE (only if the key is encrypted),
+#   DBT_CI_SCHEMA (ci target's per-PR scratch schema)
+
+steam_analytics:
+  target: "{{ env_var('DBT_TARGET', 'dev') }}"
+  outputs:
+
+    dev:
+      type: snowflake
+      account: "{{ env_var('SNOWFLAKE_ACCOUNT') }}"
+      user: "{{ env_var('SNOWFLAKE_USER') }}"
+      role: "{{ env_var('SNOWFLAKE_ROLE', 'TRANSFORMER') }}"
+      warehouse: "{{ env_var('SNOWFLAKE_WAREHOUSE', 'TRANSFORMING') }}"
+      database: "{{ env_var('SNOWFLAKE_DATABASE') }}"
+      # Fallback schema only — real schemas come from
+      # macros/generate_schema_name.sql (folder-derived).
+      schema: "{{ env_var('SNOWFLAKE_SCHEMA', 'dbt_dev') }}"
+      private_key_path: "{{ env_var('SNOWFLAKE_PRIVATE_KEY_PATH') }}"
+      private_key_passphrase: "{{ env_var('DBT_ENV_SECRET_SNOWFLAKE_KEY_PASSPHRASE', '') }}"
+      threads: "{{ env_var('DBT_THREADS', '4') | int }}"
+
+    ci:
+      type: snowflake
+      account: "{{ env_var('SNOWFLAKE_ACCOUNT') }}"
+      user: "{{ env_var('SNOWFLAKE_USER') }}"
+      role: "{{ env_var('SNOWFLAKE_ROLE', 'TRANSFORMER') }}"
+      warehouse: "{{ env_var('SNOWFLAKE_WAREHOUSE', 'TRANSFORMING') }}"
+      database: "{{ env_var('SNOWFLAKE_DATABASE') }}"
+      schema: "{{ env_var('DBT_CI_SCHEMA', 'ci') }}"
+      private_key_path: "{{ env_var('SNOWFLAKE_PRIVATE_KEY_PATH') }}"
+      private_key_passphrase: "{{ env_var('DBT_ENV_SECRET_SNOWFLAKE_KEY_PASSPHRASE', '') }}"
+      threads: "{{ env_var('DBT_THREADS', '4') | int }}"
+
+    prod:
+      type: snowflake
+      account: "{{ env_var('SNOWFLAKE_ACCOUNT') }}"
+      user: "{{ env_var('SNOWFLAKE_USER') }}"
+      role: "{{ env_var('SNOWFLAKE_ROLE', 'TRANSFORMER') }}"
+      warehouse: "{{ env_var('SNOWFLAKE_WAREHOUSE', 'TRANSFORMING') }}"
+      database: "{{ env_var('SNOWFLAKE_DATABASE') }}"
+      schema: "{{ env_var('SNOWFLAKE_SCHEMA', 'prod') }}"
+      private_key_path: "{{ env_var('SNOWFLAKE_PRIVATE_KEY_PATH') }}"
+      private_key_passphrase: "{{ env_var('DBT_ENV_SECRET_SNOWFLAKE_KEY_PASSPHRASE', '') }}"
+      threads: "{{ env_var('DBT_THREADS', '8') | int }}"

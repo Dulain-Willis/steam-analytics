@@ -1,0 +1,39 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  parse-and-lint:
+    runs-on: ubuntu-latest
+    env:
+      DBT_TARGET: ci
+      # dbt parse / sqlfluff render the project but never connect, so dummy
+      # Snowflake values are enough here. Real creds land in Phase 2+ when CI
+      # starts building against a scratch schema.
+      SNOWFLAKE_ACCOUNT: dummy
+      SNOWFLAKE_USER: dummy
+      SNOWFLAKE_DATABASE: DUMMY
+      SNOWFLAKE_PRIVATE_KEY_PATH: /tmp/nonexistent.p8
+      DBT_CI_SCHEMA: ci
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: install
+        run: pip install -r requirements.txt
+
+      - name: dbt deps
+        run: dbt deps
+
+      - name: dbt parse
+        run: dbt parse
+
+      - name: sqlfluff lint
+        run: sqlfluff lint .
