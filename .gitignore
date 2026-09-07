@@ -1,0 +1,18 @@
+# dbt
+target/
+dbt_packages/
+logs/
+.user.yml
+
+# Snowflake key material — never commit
+*.p8
+*.pem
+.secrets/
+
+# env
+.env
+.envrc
+
+# python
+.venv/
+__pycache__/
