@@ -1,3 +1,15 @@
+## Running commands
+
+Run every Python tool in this repo — `dbt`, `sqlfluff` — through `uv run`, which
+resolves them against the project's `.venv` and `requirements.txt`:
+
+```
+uv run dbt parse
+uv run sqlfluff lint .
+```
+
+Ask the user first before installing anything globally.
+
 ## Agent skills
 
 ### Issue tracker
