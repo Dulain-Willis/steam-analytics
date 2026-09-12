@@ -1,0 +1,72 @@
+version: 2
+
+models:
+  - name: fct_product_active_users_daily
+    description: >
+      One row per date with any playtime activity. dau = distinct users
+      active that day; wau = trailing 7-calendar-day distinct count. Global,
+      no cohort split (see fct_product_session_length_daily for that).
+      Singular test in tests/ covers non-negative measures and wau >= dau.
+    columns:
+      - name: active_users_daily_key
+        tests: [unique, not_null]
+      - name: active_date
+        tests: [unique, not_null]
+      - name: dau
+        tests: [not_null]
+      - name: wau
+        tests: [not_null]
+
+  - name: fct_product_session_length_daily
+    description: >
+      One row per date x game x new-vs-returning user cohort. A user is
+      'new' on their first-ever active date for that specific game (not
+      platform-wide - fct_product_active_users_daily already covers that)
+      and 'returning' on every later one. Open sessions are excluded - a
+      session with no duration can't contribute to session length.
+      Singular test in tests/ covers non-negative measures.
+    columns:
+      - name: session_length_daily_key
+        tests: [unique, not_null]
+      - name: started_date
+        tests: [not_null]
+      - name: game_key
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_games')
+                field: game_key
+      - name: user_cohort
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['new', 'returning']
+
+  - name: fct_product_wishlist_conversion
+    description: >
+      One row per game, rolled up from wishlist_items-row-level conversion.
+      A wishlist add counts as converted if any fct_ownership_grants row
+      exists for that (user, game) with granted_at after the add - any
+      grant source, unbounded window. median_days_to_convert is measured to
+      the earliest such grant, over converted rows only. Singular tests in
+      tests/ cover non-negative measures and independently re-derive the
+      conversion logic from the core facts.
+    columns:
+      - name: wishlist_conversion_key
+        tests: [unique, not_null]
+      - name: game_key
+        tests:
+          - unique
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_games')
+                field: game_key
+      - name: wishlist_add_count
+        tests: [not_null]
+      - name: converted_count
+        tests: [not_null]
+      - name: conversion_rate
+        tests: [not_null]
