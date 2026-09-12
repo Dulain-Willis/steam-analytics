@@ -7,6 +7,13 @@ config-version: 2
 # generate_schema_name macro in macros/.
 profile: 'steam_analytics'
 
+# dim_date's active window (see CONTEXT.md). Static bounds covering the
+# synthetic data's expected range; override via --vars if the data window
+# shifts.
+vars:
+  dim_date_start_date: '2023-01-01'
+  dim_date_end_date: '2027-01-01'
+
 model-paths: ["models"]
 seed-paths: ["seeds"]
 macro-paths: ["macros"]

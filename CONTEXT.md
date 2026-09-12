@@ -72,8 +72,19 @@ a synonym is listed as *avoid*, do not drift to it.
 - **dim_games** — type 1. One row per game.
 - **dim_game_prices** — genuine **SCD2**. One row per
   `game_id × region × [valid_from, valid_to)`, replayed from the
-  `price_changes` event log. `is_current = true` for the open interval.
-- **dim_date** — generated date spine over the project's active window.
+  `price_changes` event log (replay prep lives in
+  `int_game_prices_replayed`). `is_current = true` for the open interval.
+  **Initial-price rule** (resolved): a `game_id × region` with
+  `price_changes` history gets an initial interval seeded from the
+  earliest change's `old_price_cents`, anchored at `dim_games.created_at`
+  (or, if that earliest change's `old_price_cents` is itself null — no
+  price existed before it — its `new_price_cents` extends back to
+  `created_at` instead). A `game_id × region` with no `price_changes`
+  history at all falls back to its current `game_prices` row, likewise
+  anchored at `created_at`.
+- **dim_date** — generated date spine (`dbt_utils.date_spine`) over the
+  project's active window, `2023-01-01` to `2027-01-01`
+  (`vars.dim_date_start_date` / `dim_date_end_date` in `dbt_project.yml`).
 
 ### Core facts
 
