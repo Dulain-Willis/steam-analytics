@@ -1,0 +1,34 @@
+version: 2
+
+models:
+  - name: dim_users
+    description: One row per user. Type 1, latest attributes only.
+    columns:
+      - name: user_key
+        tests: [unique, not_null]
+      - name: user_id
+        tests: [unique, not_null]
+
+  - name: dim_games
+    description: One row per game. Type 1, latest attributes only.
+    columns:
+      - name: game_key
+        tests: [unique, not_null]
+      - name: game_id
+        tests: [unique, not_null]
+
+  - name: dim_date
+    description: Date spine over the project's active window (CONTEXT.md).
+    columns:
+      - name: date_day
+        tests: [unique, not_null]
+
+  - name: dim_game_prices
+    description: >
+      SCD2. One row per game_id x region x [valid_from, valid_to), replayed
+      from the price_changes event log (see int_game_prices_replayed).
+      Singular tests in tests/ cover non-overlap, gap-free coverage, and
+      exactly-one-current-row per game_id x region.
+    columns:
+      - name: game_price_key
+        tests: [unique, not_null]
