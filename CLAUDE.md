@@ -10,6 +10,13 @@ uv run sqlfluff lint .
 
 Ask the user first before installing anything globally.
 
+## Writing SQL 
+
+ALWAYS refer to /docs/style_guide.md for writing SQL 
+
+DO NOT rely on training data 
+DO NOT use other dbt models as style reference
+
 ## Agent skills
 
 ### Issue tracker
