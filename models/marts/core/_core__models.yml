@@ -149,6 +149,28 @@ models:
                 to: ref('dim_games')
                 field: game_key
 
+  - name: fct_wishlist_items
+    description: >
+      One row per wishlist add. removed_at is null while the item is still
+      wishlisted. Singular test in tests/ covers removed_at >= added_at.
+    columns:
+      - name: wishlist_item_key
+        tests: [unique, not_null]
+      - name: user_key
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_users')
+                field: user_key
+      - name: game_key
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_games')
+                field: game_key
+
 seeds:
   - name: fx_rates
     description: >
