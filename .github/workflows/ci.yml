@@ -37,3 +37,16 @@ jobs:
 
       - name: sqlfluff lint
         run: sqlfluff lint .
+
+      - name: dbt source freshness
+        # Reported, not gating: honestly allowed to fail (e.g. steam-infra
+        # torn down, or these secrets not yet configured in this repo).
+        continue-on-error: true
+        env:
+          SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+          SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
+          SNOWFLAKE_DATABASE: ${{ secrets.SNOWFLAKE_DATABASE }}
+          SNOWFLAKE_PRIVATE_KEY_PATH: /tmp/snowflake_key.p8
+        run: |
+          printf '%s' "${{ secrets.SNOWFLAKE_PRIVATE_KEY }}" > /tmp/snowflake_key.p8
+          dbt source freshness

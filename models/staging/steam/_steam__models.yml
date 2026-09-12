@@ -1,0 +1,98 @@
+version: 2
+
+models:
+  - name: stg_steam__users
+    description: One row per user. Type-1, latest attributes only.
+    columns:
+      - name: user_id
+        tests: [unique, not_null]
+
+  - name: stg_steam__games
+    description: One row per game. Type-1, latest attributes only.
+    columns:
+      - name: game_id
+        tests: [unique, not_null]
+
+  - name: stg_steam__game_prices
+    description: One row per (game, region) current price.
+    columns:
+      - name: game_price_id
+        tests: [unique, not_null]
+
+  - name: stg_steam__marketing_campaigns
+    description: One row per marketing campaign.
+    columns:
+      - name: marketing_campaign_id
+        tests: [unique, not_null]
+
+  - name: stg_steam__purchases
+    description: One row per purchase.
+    columns:
+      - name: purchase_id
+        tests: [unique, not_null]
+
+  - name: stg_steam__ownership_grants
+    description: One row per ownership grant (purchase, gift, or key redemption).
+    columns:
+      - name: ownership_grant_id
+        tests: [unique, not_null]
+
+  - name: stg_steam__gifts
+    description: One row per gift.
+    columns:
+      - name: gift_id
+        tests: [unique, not_null]
+
+  - name: stg_steam__key_redemptions
+    description: One row per key redemption.
+    columns:
+      - name: key_redemption_id
+        tests: [unique, not_null]
+
+  - name: stg_steam__refunds
+    description: One row per refund.
+    columns:
+      - name: refund_id
+        tests: [unique, not_null]
+
+  - name: stg_steam__family_shares
+    description: One row per family share.
+    columns:
+      - name: family_share_id
+        tests: [unique, not_null]
+
+  - name: stg_steam__wishlist_items
+    description: One row per wishlist add.
+    columns:
+      - name: wishlist_item_id
+        tests: [unique, not_null]
+
+  - name: stg_steam__playtime_sessions
+    description: One row per playtime session.
+    columns:
+      - name: playtime_session_id
+        tests: [unique, not_null]
+
+  - name: stg_steam__reviews
+    description: One row per review.
+    columns:
+      - name: review_id
+        tests: [unique, not_null]
+
+  - name: stg_steam__price_changes
+    description: One row per price change event, replayed into dim_game_prices.
+    columns:
+      - name: price_change_id
+        tests: [unique, not_null]
+
+  - name: stg_steam__concurrent_player_snapshots
+    description: One row per game per concurrent-player snapshot.
+    columns:
+      - name: concurrent_player_snapshot_id
+        tests: [unique, not_null]
+
+  - name: stg_steam__client_events
+    description: One row per client-side funnel event.
+    columns:
+      - name: event_id
+        tests: [unique, not_null]
