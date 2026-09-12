@@ -32,3 +32,137 @@ models:
     columns:
       - name: game_price_key
         tests: [unique, not_null]
+
+  - name: fct_purchases
+    description: >
+      One row per purchase. amount_usd is derived from amount_cents via an
+      FX join to the fx_rates seed. Singular tests in tests/ cover
+      amount_usd non-null / sane-ratio coverage.
+    columns:
+      - name: purchase_key
+        tests: [unique, not_null]
+      - name: user_key
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_users')
+                field: user_key
+      - name: game_key
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_games')
+                field: game_key
+
+  - name: fct_refunds
+    description: >
+      One row per refund, valued from its linked purchase. Singular test in
+      tests/ covers refunded_at >= the linked purchase's purchased_at.
+    columns:
+      - name: refund_key
+        tests: [unique, not_null]
+      - name: purchase_key
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('fct_purchases')
+                field: purchase_key
+      - name: user_key
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_users')
+                field: user_key
+      - name: game_key
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_games')
+                field: game_key
+
+  - name: fct_ownership_grants
+    description: >
+      One row per grant of a game to a user. source distinguishes how the
+      game was acquired (purchase, gift, key_redemption).
+    columns:
+      - name: ownership_grant_key
+        tests: [unique, not_null]
+      - name: user_key
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_users')
+                field: user_key
+      - name: game_key
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_games')
+                field: game_key
+      - name: source
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['purchase', 'gift', 'key_redemption']
+
+  - name: fct_playtime_sessions
+    description: >
+      One row per gameplay session. Open sessions (no ended_at) carry
+      is_open = true and a null duration_minutes.
+    columns:
+      - name: playtime_session_key
+        tests: [unique, not_null]
+      - name: user_key
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_users')
+                field: user_key
+      - name: game_key
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_games')
+                field: game_key
+      - name: is_open
+        tests: [not_null]
+
+  - name: fct_concurrent_player_snapshots
+    description: One row per game x concurrent-player snapshot.
+    columns:
+      - name: concurrent_player_snapshot_key
+        tests: [unique, not_null]
+      - name: game_key
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_games')
+                field: game_key
+
+seeds:
+  - name: fx_rates
+    description: >
+      Synthetic daily FX rates (rate_to_usd) for USD/EUR/GBP/BRL/JPY over
+      the project's active window. USD rows are always 1.0. The only
+      reference-data seed in the project.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [date, currency]
+    columns:
+      - name: date
+        tests: [not_null]
+      - name: currency
+        tests: [not_null]
+      - name: rate_to_usd
+        tests: [not_null]

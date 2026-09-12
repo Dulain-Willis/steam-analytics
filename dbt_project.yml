@@ -14,6 +14,14 @@ vars:
   dim_date_start_date: '2023-01-01'
   dim_date_end_date: '2027-01-01'
 
+seeds:
+  steam_analytics:
+    fx_rates:
+      +column_types:
+        date: date
+        currency: varchar(3)
+        rate_to_usd: float
+
 model-paths: ["models"]
 seed-paths: ["seeds"]
 macro-paths: ["macros"]
