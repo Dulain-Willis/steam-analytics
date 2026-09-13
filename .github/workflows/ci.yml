@@ -2,8 +2,6 @@ name: ci
 
 on:
   pull_request:
-  push:
-    branches: [main]
 
 jobs:
   parse-and-lint:
@@ -15,7 +13,7 @@ jobs:
       SNOWFLAKE_USER: dummy
       SNOWFLAKE_DATABASE: dummy
       SNOWFLAKE_PRIVATE_KEY_PATH: dummy
-      DBT_CI_SCHEMA: ci
+      DBT_CI_SCHEMA: dummy
 
     steps:
       - name: Checkout steam-analytics onto the runner
@@ -39,21 +37,11 @@ jobs:
       - name: Run sqlfluff linter 
         run: sqlfluff lint .
 
-      - name: dbt source freshness
-        # Reported, not gating: honestly allowed to fail (e.g. steam-infra
-        # torn down, or these secrets not yet configured in this repo).
-        continue-on-error: true
-        env:
-          SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
-          SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
-          SNOWFLAKE_DATABASE: ${{ secrets.SNOWFLAKE_DATABASE }}
-          SNOWFLAKE_PRIVATE_KEY_PATH: /tmp/snowflake_key.p8
-        run: |
-          printf '%s' "${{ secrets.SNOWFLAKE_PRIVATE_KEY }}" > /tmp/snowflake_key.p8
-          dbt source freshness
-
   dbt-run: 
     runs-on: ubuntu-latest
+    permissions:
+      actions: read 
+      contents: read
 
     env: 
       DBT_TARGET: ci
@@ -62,10 +50,9 @@ jobs:
       SNOWFLAKE_ROLE: ${{ secrets.SNOWFLAKE_ROLE }}
       SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
       SNOWFLAKE_DATABASE: ${{ secrets.SNOWFLAKE_DATABASE  }}
-      SNOWFLAKE_SCHEMA: 
+      DBT_CI_SCHEMA: ci_pr_${{ github.event.pull_request.number }}
       SNOWFLAKE_PRIVATE_KEY_PATH: ${{ runner.temp }}/snowflake_private_key.p8
       
-
     steps:
       - name: Checkout steam-analytics onto the runner
         uses: actions/checkout@v4 
@@ -88,3 +75,21 @@ jobs:
         run: |
           printf '%s' "$SNOWFLAKE_PRIVATE_KEY" > "$RUNNER_TEMP/snowflake_private_key.p8"
           chmod 600 "$RUNNER_TEMP/snowflake_private_key.p8"
+
+      - name: Download latest latest prod manifest.json 
+        uses: dawidd6/action-download-artifact@v6 
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          workflow: update-dbt-artifacts-and-docs.yml
+          workflow_conclusion: success
+          branch: main 
+          name: dbt-manifest
+          path: state
+
+      - name: Run dbt build against prod
+        run: dbt build --select state:modified+ --defer --state state
+
+      - name: Drop the ci_pr_* schema made from dbt build 
+        if: always()
+        run: dbt run-operation drop_ci_schema 
+
