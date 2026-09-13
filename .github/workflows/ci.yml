@@ -2,10 +2,12 @@ name: ci
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
 
 jobs:
   parse-and-lint:
     runs-on: ubuntu-latest
+    if: github.event.pull_request.draft == false
 
     env:
       DBT_TARGET: ci
@@ -37,10 +39,12 @@ jobs:
       - name: Run sqlfluff linter 
         run: sqlfluff lint .
 
-  dbt-run: 
+  dbt-run:
+    needs: parse-and-lint
     runs-on: ubuntu-latest
+    if: github.event.pull_request.draft == false
     permissions:
-      actions: read 
+      actions: read
       contents: read
 
     env: 
