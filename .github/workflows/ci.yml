@@ -51,8 +51,7 @@ jobs:
       SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
       SNOWFLAKE_DATABASE: ${{ secrets.SNOWFLAKE_DATABASE  }}
       DBT_CI_SCHEMA: ci_pr_${{ github.event.pull_request.number }}
-      SNOWFLAKE_PRIVATE_KEY_PATH: ${{ runner.temp }}/snowflake_private_key.p8
-      
+
     steps:
       - name: Checkout steam-analytics onto the runner
         uses: actions/checkout@v4 
@@ -75,6 +74,7 @@ jobs:
         run: |
           printf '%s' "$SNOWFLAKE_PRIVATE_KEY" > "$RUNNER_TEMP/snowflake_private_key.p8"
           chmod 600 "$RUNNER_TEMP/snowflake_private_key.p8"
+          echo "SNOWFLAKE_PRIVATE_KEY_PATH=$RUNNER_TEMP/snowflake_private_key.p8" >> "$GITHUB_ENV"
 
       - name: Download latest latest prod manifest.json 
         uses: dawidd6/action-download-artifact@v6 
