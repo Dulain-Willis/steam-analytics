@@ -2,51 +2,98 @@ name: ci
 
 on:
   pull_request:
-  push:
-    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
 
 jobs:
   parse-and-lint:
     runs-on: ubuntu-latest
+    if: github.event.pull_request.draft == false
+
     env:
       DBT_TARGET: ci
-      # dbt parse / sqlfluff render the project but never connect, so dummy
-      # Snowflake values are enough here. Real creds land in Phase 2+ when CI
-      # starts building against a scratch schema.
       SNOWFLAKE_ACCOUNT: dummy
       SNOWFLAKE_USER: dummy
-      SNOWFLAKE_DATABASE: DUMMY
-      SNOWFLAKE_PRIVATE_KEY_PATH: /tmp/nonexistent.p8
-      DBT_CI_SCHEMA: ci
-    steps:
-      - uses: actions/checkout@v4
+      SNOWFLAKE_DATABASE: dummy
+      SNOWFLAKE_PRIVATE_KEY_PATH: dummy
+      DBT_CI_SCHEMA: dummy
 
-      - uses: actions/setup-python@v5
+    steps:
+      - name: Checkout steam-analytics onto the runner
+        uses: actions/checkout@v4 
+
+      - name: Set up python environment
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
-          cache: pip
+          cache: pip 
 
-      - name: install
-        run: pip install -r requirements.txt
+      - name: Install python packages
+        run: pip install -r requirements.txt 
 
-      - name: dbt deps
-        run: dbt deps
+      - name: Install dbt packages 
+        run: dbt deps 
 
-      - name: dbt parse
+      - name: Run dbt parse
         run: dbt parse
 
-      - name: sqlfluff lint
+      - name: Run sqlfluff linter 
         run: sqlfluff lint .
 
-      - name: dbt source freshness
-        # Reported, not gating: honestly allowed to fail (e.g. steam-infra
-        # torn down, or these secrets not yet configured in this repo).
-        continue-on-error: true
+  dbt-run:
+    needs: parse-and-lint
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.draft == false
+    permissions:
+      actions: read
+      contents: read
+
+    env: 
+      DBT_TARGET: ci
+      SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+      SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
+      SNOWFLAKE_ROLE: ${{ secrets.SNOWFLAKE_ROLE }}
+      SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
+      SNOWFLAKE_DATABASE: ${{ secrets.SNOWFLAKE_DATABASE  }}
+      DBT_CI_SCHEMA: ci_pr_${{ github.event.pull_request.number }}
+
+    steps:
+      - name: Checkout steam-analytics onto the runner
+        uses: actions/checkout@v4 
+
+      - name: Set up python environment
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip 
+
+      - name: Install python packages
+        run: pip install -r requirements.txt 
+
+      - name: Install dbt packages 
+        run: dbt deps 
+
+      - name: Write private Snowflake key to runner disk
         env:
-          SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
-          SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
-          SNOWFLAKE_DATABASE: ${{ secrets.SNOWFLAKE_DATABASE }}
-          SNOWFLAKE_PRIVATE_KEY_PATH: /tmp/snowflake_key.p8
+          SNOWFLAKE_PRIVATE_KEY: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
         run: |
-          printf '%s' "${{ secrets.SNOWFLAKE_PRIVATE_KEY }}" > /tmp/snowflake_key.p8
-          dbt source freshness
+          printf '%s' "$SNOWFLAKE_PRIVATE_KEY" > "$RUNNER_TEMP/snowflake_private_key.p8"
+          chmod 600 "$RUNNER_TEMP/snowflake_private_key.p8"
+          echo "SNOWFLAKE_PRIVATE_KEY_PATH=$RUNNER_TEMP/snowflake_private_key.p8" >> "$GITHUB_ENV"
+
+      - name: Download latest latest prod manifest.json 
+        uses: dawidd6/action-download-artifact@v6 
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          workflow: update-dbt-artifacts-and-docs.yml
+          workflow_conclusion: success
+          branch: main 
+          name: dbt-manifest
+          path: state
+
+      - name: Run dbt build against prod
+        run: dbt build --select state:modified+ --defer --state state
+
+      - name: Drop the ci_pr_* schema made from dbt build 
+        if: always()
+        run: dbt run-operation drop_ci_schema 
+

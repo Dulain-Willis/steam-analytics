@@ -1,0 +1,90 @@
+name: update-dbt-artifacts-and-docs
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+
+  serve-dbt-docs:
+    runs-on: ubuntu-latest
+    permissions: 
+      pages: write 
+      id-token: write 
+    environment: github-pages
+
+    env: 
+      SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+      SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
+      SNOWFLAKE_ROLE: ${{ secrets.SNOWFLAKE_ROLE }}
+      SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
+      SNOWFLAKE_DATABASE: ${{ secrets.SNOWFLAKE_DATABASE  }}
+
+    steps:
+      - name: Checkout steam-analytics onto the runner
+        uses: actions/checkout@v4 
+
+      - name: Set up python environment
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip 
+
+      - name: Install python packages
+        run: pip install -r requirements.txt 
+
+      - name: Install dbt packages 
+        run: dbt deps 
+      
+      - name: Write private Snowflake key to runner disk
+        env:
+          SNOWFLAKE_PRIVATE_KEY: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
+        run: |
+          printf '%s' "$SNOWFLAKE_PRIVATE_KEY" > "$RUNNER_TEMP/snowflake_private_key.p8"
+          chmod 600 "$RUNNER_TEMP/snowflake_private_key.p8"
+          echo "SNOWFLAKE_PRIVATE_KEY_PATH=$RUNNER_TEMP/snowflake_private_key.p8" >> "$GITHUB_ENV"
+
+      - name: Generate dbt docs
+        run: dbt docs generate
+
+      - name: Upload dbt docs code to Github Pages 
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: target
+
+      - name: Deploy dbt docs to Github Pages 
+        uses: actions/deploy-pages@v4 
+      
+  update-dbt-artifacts:
+    runs-on: ubuntu-latest
+
+    env:
+      SNOWFLAKE_ACCOUNT: dummy
+      SNOWFLAKE_USER: dummy
+      SNOWFLAKE_DATABASE: dummy
+      SNOWFLAKE_PRIVATE_KEY_PATH: dummy
+
+    steps:
+      - name: Checkout steam-analytics onto the runner
+        uses: actions/checkout@v4 
+
+      - name: Set up python environment
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip 
+
+      - name: Install python packages
+        run: pip install -r requirements.txt 
+
+      - name: Install dbt packages 
+        run: dbt deps 
+
+      - name: Parse for latest manifest.json
+        run: dbt parse
+
+      - name: Upload latest manifest.json as artifact 
+        uses: actions/upload-artifact@v4 
+        with:
+          name: dbt-manifest
+          path: target/manifest.json
