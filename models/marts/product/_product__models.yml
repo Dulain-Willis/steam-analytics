@@ -70,3 +70,32 @@ models:
         tests: [not_null]
       - name: conversion_rate
         tests: [not_null]
+
+  - name: fct_product_funnel_sessions
+    description: >
+      One row per browsing session (issue #23), over the stages
+      store_page_view -> game_page_view -> add_to_wishlist ->
+      begin_checkout -> purchase_complete. Grouped by client_events
+      session_id - a browsing-session boundary, not a date bucket, so
+      repeat browse sessions on the same day are not collapsed (see
+      CONTEXT.md for the browsing session definition). Each stage carries
+      its first-occurred timestamp plus a has_reached_<stage> boolean;
+      purchase_complete is a marker only - amount / grant detail comes from
+      fct_ownership_grants. Singular test in tests/ covers stage timestamps
+      being non-decreasing within a session.
+    columns:
+      - name: funnel_session_key
+        tests: [unique, not_null]
+      - name: session_id
+        tests: [unique, not_null]
+      - name: user_id
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_users')
+                field: user_id
+      - name: session_date
+        tests: [not_null]
+      - name: session_started_at
+        tests: [not_null]
