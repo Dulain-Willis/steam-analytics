@@ -26,3 +26,7 @@ Issues tracked in GitHub Issues (Dulain-Willis/steam-analytics), via `gh` CLI. S
 ### Domain docs
 
 Single-context layout: `CONTEXT.md` + `docs/adr/` at repo root (created lazily). See `docs/agents/domain.md`.
+
+### Commit
+
+NEVER add Co-Authored or Clause-Session to commit messages

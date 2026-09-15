@@ -44,7 +44,10 @@ a synonym is listed as *avoid*, do not drift to it.
   `ref()`. Owned by Central Data Eng. Materialized as `table`. Schema:
   `marts_core`.
 - **spoke mart** — a `marts/<team>/` folder (product, marketing, finance).
-  Flat, no subject subfolders. May `ref()` only `marts/core`. Schemas:
+  Flat, no subject subfolders. May `ref()` only `marts/core` - except
+  `fct_product_funnel_sessions` (issue #23), sanctioned to `ref()` the
+  `client_events` staging model directly, since the funnel is event-grain
+  and has no `marts/core` conformed source to build on. Schemas:
   `marts_product`, `marts_marketing`, `marts_finance`.
 - **Pipeline Health** — facts about the pipeline itself (`fct_dbt_test_results`,
   `fct_source_freshness`, `fct_row_counts`, `fct_pipeline_runs`), fed by the
@@ -114,7 +117,16 @@ a synonym is listed as *avoid*, do not drift to it.
 - **source** (on `fct_ownership_grants`) — *how* a user got the game
   (purchase / gift / key_redemption). Orthogonal to `campaign_id`.
 - **browsing session** (`client_events.session_id`) — a store-browsing visit.
-  Distinct from **playtime session**, which tracks only gameplay.
+  Boundary decision (issue #23): the session is whatever `session_id` the
+  client emits on each event — an explicit marker, not a gap-inferred
+  session computed downstream from `occurred_at`. *Avoid* re-deriving
+  session boundaries from an inactivity gap. Distinct from **playtime
+  session**, which tracks only gameplay.
+- **fct_product_funnel_sessions** — one row per browsing session, over the
+  stages `store_page_view -> game_page_view -> add_to_wishlist ->
+  begin_checkout -> purchase_complete`. `purchase_complete` is a marker
+  event only; dollar / grant detail comes from `fct_ownership_grants`, not
+  event props.
 - **int_users_campaign_attribution** — one row per user, resolving
   `dim_users.campaign_id` to a `channel` (NULL `campaign_id` -> `'organic'`
   here only - never a fake row in `dim_marketing_campaigns`). Shared by
