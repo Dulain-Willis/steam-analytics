@@ -8,6 +8,36 @@ models:
         tests: [unique, not_null]
       - name: user_id
         tests: [unique, not_null]
+      - name: campaign_id
+        description: >
+          Immutable first-touch attribution, set once at signup. NULL =
+          organic/direct (CONTEXT.md) - never a fake "organic" campaign row.
+        tests:
+          - relationships:
+              arguments:
+                to: ref('dim_marketing_campaigns')
+                field: marketing_campaign_id
+
+  - name: dim_marketing_campaigns
+    description: One row per marketing campaign. Type 1, latest attributes only.
+    columns:
+      - name: marketing_campaign_key
+        tests: [unique, not_null]
+      - name: marketing_campaign_id
+        tests: [unique, not_null]
+      - name: channel
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  [
+                    'paid_search',
+                    'paid_social',
+                    'email',
+                    'influencer',
+                    'affiliate',
+                  ]
 
   - name: dim_games
     description: One row per game. Type 1, latest attributes only.

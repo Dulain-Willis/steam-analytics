@@ -1,0 +1,107 @@
+version: 2
+
+models:
+  - name: fct_marketing_signups_daily
+    description: >
+      One row per signup_date x channel. channel is derived from a user's
+      immutable first-touch campaign_id; NULL campaign_id rolls up to the
+      'organic' channel bucket here only (CONTEXT.md) - dim_marketing_campaigns
+      never carries a fake "organic" row. Singular tests in tests/ cover
+      non-negative signup_count and independently re-derive organic vs.
+      campaign-attributed counts from dim_users / dim_marketing_campaigns.
+    columns:
+      - name: marketing_signups_daily_key
+        tests: [unique, not_null]
+      - name: signup_date
+        tests: [not_null]
+      - name: channel
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  [
+                    'paid_search',
+                    'paid_social',
+                    'email',
+                    'influencer',
+                    'affiliate',
+                    'organic',
+                  ]
+      - name: signup_count
+        tests: [not_null]
+
+  - name: fct_marketing_campaign_cpa
+    description: >
+      One row per campaign. attributed_signup_count is every user
+      first-touch attributed to the campaign (int_users_campaign_attribution),
+      no time window (matching spend_cents, steam-infra's lifetime campaign
+      total). cpa_usd is spend_cents / 100.0 / attributed_signup_count, null
+      when attributed_signup_count is 0 (an undefined ratio, not a
+      misleading $0). Roll up to channel by summing spend_cents and
+      attributed_signup_count and recomputing the ratio - do not average
+      cpa_usd across campaigns. Singular test in tests/ covers non-negative
+      measures.
+    columns:
+      - name: marketing_campaign_cpa_key
+        tests: [unique, not_null]
+      - name: marketing_campaign_key
+        tests:
+          - unique
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_marketing_campaigns')
+                field: marketing_campaign_key
+      - name: channel
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  [
+                    'paid_search',
+                    'paid_social',
+                    'email',
+                    'influencer',
+                    'affiliate',
+                  ]
+      - name: spend_cents
+        tests: [not_null]
+      - name: attributed_signup_count
+        tests: [not_null]
+
+  - name: fct_marketing_campaign_revenue
+    description: >
+      One row per campaign. attributed_revenue_usd is the lifetime sum of
+      fct_purchases.amount_usd for users first-touch attributed to the
+      campaign (int_users_campaign_attribution) - unbounded window,
+      attributed users only (organic revenue is out of scope for this
+      model). Roll up to channel by summing attributed_revenue_usd.
+      Singular test in tests/ covers non-negative measures.
+    columns:
+      - name: marketing_campaign_revenue_key
+        tests: [unique, not_null]
+      - name: marketing_campaign_key
+        tests:
+          - unique
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_marketing_campaigns')
+                field: marketing_campaign_key
+      - name: channel
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  [
+                    'paid_search',
+                    'paid_social',
+                    'email',
+                    'influencer',
+                    'affiliate',
+                  ]
+      - name: attributed_revenue_usd
+        tests: [not_null]

@@ -85,6 +85,11 @@ a synonym is listed as *avoid*, do not drift to it.
 - **dim_date** — generated date spine (`dbt_utils.date_spine`) over the
   project's active window, `2023-01-01` to `2027-01-01`
   (`vars.dim_date_start_date` / `dim_date_end_date` in `dbt_project.yml`).
+- **dim_marketing_campaigns** — type 1. One row per campaign. Lives in
+  `marts/core`, not `marts/marketing`, so `dim_users.campaign_id` and every
+  spoke conform on the same `marketing_campaign_key` (spokes may `ref()` only
+  `marts/core`). `channel` enum: `paid_search`, `paid_social`, `email`,
+  `influencer`, `affiliate`.
 
 ### Core facts
 
@@ -110,6 +115,19 @@ a synonym is listed as *avoid*, do not drift to it.
   (purchase / gift / key_redemption). Orthogonal to `campaign_id`.
 - **browsing session** (`client_events.session_id`) — a store-browsing visit.
   Distinct from **playtime session**, which tracks only gameplay.
+- **int_users_campaign_attribution** — one row per user, resolving
+  `dim_users.campaign_id` to a `channel` (NULL `campaign_id` -> `'organic'`
+  here only - never a fake row in `dim_marketing_campaigns`). Shared by
+  every `marts/marketing` fact that needs channel/campaign attribution.
+- **marts/marketing** — `fct_marketing_signups_daily` (date x channel),
+  `fct_marketing_campaign_cpa` (one row per campaign; `spend_cents` /
+  `attributed_signup_count`, no time window - `cpa_usd` is `null` for a
+  campaign with zero attributed signups, an undefined ratio, not a
+  misleading `0` - roll up to channel by summing both measures and
+  recomputing the ratio, not by averaging `cpa_usd`), and
+  `fct_marketing_campaign_revenue` (one row per campaign; lifetime
+  `fct_purchases.amount_usd` for attributed users only, unbounded window -
+  organic revenue is out of scope here).
 
 ### fx_rates seed
 
