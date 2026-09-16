@@ -201,6 +201,59 @@ models:
                 to: ref('dim_games')
                 field: game_key
 
+  - name: fct_dbt_test_results
+    description: >
+      One row per dbt schema x day. Daily test pass rate (pass_count /
+      test_count) sourced from the elementary package's dbt_run_results,
+      joined through dbt_tests to dbt_models for schema_name.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [run_date, schema_name]
+    columns:
+      - name: run_date
+        tests: [not_null]
+      - name: schema_name
+        tests: [not_null]
+      - name: test_count
+        tests: [not_null]
+      - name: pass_count
+        tests: [not_null]
+
+  - name: fct_source_freshness
+    description: >
+      One row per source freshness check (history, not deduped to latest),
+      sourced from the elementary package's dbt_source_freshness_results
+      joined to dbt_sources for readable source/table/schema names.
+    columns:
+      - name: source_freshness_execution_id
+        tests: [unique, not_null]
+      - name: unique_id
+        tests: [not_null]
+      - name: status
+        tests: [not_null]
+
+  - name: fct_row_counts
+    description: >
+      One row per table x day, snapshotting row_count from
+      information_schema.tables. Independent of build frequency - captures
+      today's count for every base table regardless of whether it was
+      rebuilt that day. Incremental, keyed on (schema_name, table_name,
+      snapshot_date).
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [schema_name, table_name, snapshot_date]
+    columns:
+      - name: schema_name
+        tests: [not_null]
+      - name: table_name
+        tests: [not_null]
+      - name: snapshot_date
+        tests: [not_null]
+      - name: row_count
+        tests: [not_null]
+
 seeds:
   - name: fx_rates
     description: >
