@@ -4,5 +4,5 @@ packages:
     version: 1.4.1
   - name: elementary
     package: elementary-data/elementary
-    version: 0.18.3
-sha1_hash: af1da6b2fd95c04925df329b5a09290b40bb475d
+    version: 0.26.0
+sha1_hash: a31f5f1f3e7a996baadcb4ffb7a776b1a34ea584
