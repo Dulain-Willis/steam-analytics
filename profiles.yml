@@ -13,14 +13,18 @@
 #                 SNOWFLAKE_PRIVATE_KEY_PATH at the .p8 file.
 #   - ci        : key stored as a GitHub Actions secret, written to a temp
 #                 file by the workflow, SNOWFLAKE_PRIVATE_KEY_PATH points at it.
-#   - prod      : k8s Secret (RSA key-pair) mounted as a file into the
-#                 Cosmos/Airflow pod on steam-infra's EKS, mirroring
-#                 steam-infra #43's Secret pattern; SNOWFLAKE_PRIVATE_KEY_PATH
-#                 points at the mount path. Wired in Phase 11 (Orchestration).
+#   - prod      : k8s Secret (RSA key-pair) injected as the
+#                 SNOWFLAKE_PRIVATE_KEY env var (raw PEM content, no file) on
+#                 the Cosmos/Airflow pod on steam-infra's EKS, mirroring
+#                 steam-infra #43's Secret pattern. Wired in Phase 11
+#                 (Orchestration). dbt-snowflake's Connections class accepts
+#                 either `private_key` (content) or `private_key_path` (file)
+#                 -- content is simpler here, no volume mount needed.
 #
 # Required env vars (all targets):
-#   SNOWFLAKE_ACCOUNT, SNOWFLAKE_USER, SNOWFLAKE_DATABASE,
-#   SNOWFLAKE_PRIVATE_KEY_PATH
+#   SNOWFLAKE_ACCOUNT, SNOWFLAKE_USER, SNOWFLAKE_DATABASE
+#   dev/ci: SNOWFLAKE_PRIVATE_KEY_PATH (file)
+#   prod:   SNOWFLAKE_PRIVATE_KEY (content)
 # Optional:
 #   SNOWFLAKE_ROLE, SNOWFLAKE_WAREHOUSE, DBT_THREADS,
 #   DBT_ENV_SECRET_SNOWFLAKE_KEY_PASSPHRASE (only if the key is encrypted),
@@ -64,6 +68,6 @@ steam_analytics:
       warehouse: "{{ env_var('SNOWFLAKE_WAREHOUSE', 'TRANSFORMING') }}"
       database: "{{ env_var('SNOWFLAKE_DATABASE') }}"
       schema: "{{ env_var('SNOWFLAKE_SCHEMA', 'prod') }}"
-      private_key_path: "{{ env_var('SNOWFLAKE_PRIVATE_KEY_PATH') }}"
+      private_key: "{{ env_var('SNOWFLAKE_PRIVATE_KEY') }}"
       private_key_passphrase: "{{ env_var('DBT_ENV_SECRET_SNOWFLAKE_KEY_PASSPHRASE', '') }}"
       threads: "{{ env_var('DBT_THREADS', '8') | int }}"
