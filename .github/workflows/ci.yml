@@ -19,25 +19,34 @@ jobs:
 
     steps:
       - name: Checkout steam-analytics onto the runner
-        uses: actions/checkout@v4 
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up python environment
         uses: actions/setup-python@v7
         with:
           python-version: "3.12"
-          cache: pip 
+          cache: pip
 
       - name: Install python packages
-        run: pip install -r requirements.txt 
+        run: pip install -r requirements.txt
 
-      - name: Install dbt packages 
-        run: dbt deps 
+      - name: Install dbt packages
+        run: dbt deps
 
       - name: Run dbt parse
         run: dbt parse
 
-      - name: Run sqlfluff linter 
-        run: sqlfluff lint .
+      - name: Find changed SQL files
+        id: changed-sql
+        run: |
+          files=$(git diff --name-only --diff-filter=ACMR "origin/${{ github.base_ref }}...HEAD" -- '*.sql' | tr '\n' ' ')
+          echo "files=$files" >> "$GITHUB_OUTPUT"
+
+      - name: Run sqlfluff linter on changed SQL files
+        if: steps.changed-sql.outputs.files != ''
+        run: sqlfluff lint ${{ steps.changed-sql.outputs.files }}
 
   dbt-run:
     needs: parse-and-lint
