@@ -33,6 +33,16 @@ clean-targets:
   - "target"
   - "dbt_packages"
 
+# Elementary's on-run-end hook uploads run/test results and (for
+# `dbt source freshness` invocations specifically) freshness results into the
+# `elementary` schema. fct_dbt_test_results and fct_source_freshness read
+# from those tables, so this hook is what feeds them. Scoped to the prod
+# target only - the elementary schema is shared/unparameterized (see
+# generate_schema_name.sql), so CI's per-PR scratch builds and local dev
+# runs must not write into it.
+on-run-end:
+  - "{% if target.name == 'prod' %}{{ elementary.on_run_end() }}{% endif %}"
+
 # Schemas are the folder-derived names below, applied verbatim in every
 # environment by macros/generate_schema_name.sql.
 models:
