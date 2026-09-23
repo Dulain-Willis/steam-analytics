@@ -33,6 +33,10 @@ clean-targets:
   - "target"
   - "dbt_packages"
 
+# Feeds fct_source_freshness / fct_dbt_test_results via elementary; prod-only so CI/dev don't pollute the shared elementary schema.
+on-run-end:
+  - "{% if target.name == 'prod' %}{{ elementary.on_run_end() }}{% endif %}"
+
 # Schemas are the folder-derived names below, applied verbatim in every
 # environment by macros/generate_schema_name.sql.
 models:

@@ -1,0 +1,47 @@
+name: source-freshness
+
+on:
+  workflow_dispatch:
+
+jobs:
+  source-freshness:
+    runs-on: ubuntu-latest
+
+    env:
+      DBT_TARGET: prod
+      SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+      SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
+      SNOWFLAKE_ROLE: ${{ secrets.SNOWFLAKE_ROLE }}
+      SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
+      SNOWFLAKE_DATABASE: ${{ secrets.SNOWFLAKE_DATABASE }}
+      SNOWFLAKE_PRIVATE_KEY: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
+
+    steps:
+      - name: Checkout steam-analytics onto the runner
+        uses: actions/checkout@v4
+
+      - name: Set up python environment
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install python packages
+        run: pip install -r requirements.txt
+
+      - name: Install dbt packages
+        run: dbt deps
+
+      - name: Run dbt source freshness
+        run: dbt source freshness
+
+      - name: Write freshness results to the job summary
+        if: always()
+        run: |
+          {
+            echo "### Source freshness results"
+            echo
+            echo '```json'
+            cat target/sources.json 2>/dev/null || echo "dbt did not produce target/sources.json - the run likely errored before completing."
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
