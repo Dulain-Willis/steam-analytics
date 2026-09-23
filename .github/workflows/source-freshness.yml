@@ -1,9 +1,5 @@
 name: source-freshness
 
-# Manual trigger only — no cron schedule. Source freshness is a
-# source-pipeline health signal (see issue #37): steam-infra is a toy
-# project torn down between sessions, so a timer here would just fail on a
-# schedule nobody's watching. Run it by hand from the Actions tab instead.
 on:
   workflow_dispatch:
 
@@ -11,15 +7,6 @@ jobs:
   source-freshness:
     runs-on: ubuntu-latest
 
-    # Not a PR/merge gate: this job has nothing depending on it, so a failing
-    # freshness check is visible in the run's status without blocking anyone.
-    #
-    # Targets prod (see profiles.yml): the on-run-end hook in dbt_project.yml
-    # only fires elementary's artifact upload for target.name == 'prod', so
-    # this is what lets a freshness run actually feed fct_source_freshness
-    # instead of getting silently dropped. The prod target takes the key as
-    # raw content (SNOWFLAKE_PRIVATE_KEY) rather than a file path, so unlike
-    # ci.yml there's no temp-file step here.
     env:
       DBT_TARGET: prod
       SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
