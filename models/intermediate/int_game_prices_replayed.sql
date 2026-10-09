@@ -8,159 +8,164 @@
 -- with no price_changes history at all falls back to its current
 -- game_prices row, also anchored at created_at.
 with
-    price_changes as (
 
-        select *
+price_changes as (
 
-        from {{ ref('stg_steam__price_changes') }}
+    select *
 
-        where not is_deleted
+    from {{ ref('stg_steam__price_changes') }}
 
-    ),
+    where not is_deleted
 
-    games as (
+),
 
-        select game_id, created_at as game_created_at
+games as (
 
-        from {{ ref('stg_steam__games') }}
+    select
+        game_id,
+        created_at as game_created_at
 
-    ),
+    from {{ ref('stg_steam__games') }}
 
-    current_game_prices as (
+),
 
-        select *
+current_game_prices as (
 
-        from {{ ref('stg_steam__game_prices') }}
+    select *
 
-        where not is_deleted
+    from {{ ref('stg_steam__game_prices') }}
 
-    ),
+    where not is_deleted
 
-    earliest_price_change_per_game_region as (
+),
 
-        select game_id, region, currency, old_price_cents, changed_at
+earliest_price_change_per_game_region as (
 
-        from price_changes
+    select
+        game_id,
+        region,
+        currency,
+        old_price_cents,
+        changed_at
 
-        qualify
-            row_number() over (
-                partition by game_id, region
-                order by changed_at asc
-            )
-            = 1
+    from price_changes
 
-    ),
+    qualify
+        row_number() over (
+            partition by game_id, region
+            order by changed_at asc
+        )
+        = 1
 
-    -- Interval before the first logged change, when the change recorded what
-    -- price preceded it.
-    initial_interval_from_price_change_history as (
+),
 
-        select
-            earliest_price_change_per_game_region.game_id,
-            earliest_price_change_per_game_region.region,
-            earliest_price_change_per_game_region.currency,
-            earliest_price_change_per_game_region.old_price_cents as price_cents,
-            games.game_created_at as valid_from,
-            earliest_price_change_per_game_region.changed_at as valid_to
+-- Interval before the first logged change, when the change recorded what
+-- price preceded it.
+initial_interval_from_price_change_history as (
 
-        from earliest_price_change_per_game_region
-        inner join games
-            on earliest_price_change_per_game_region.game_id = games.game_id
+    select
+        earliest_price_change_per_game_region.game_id,
+        earliest_price_change_per_game_region.region,
+        earliest_price_change_per_game_region.currency,
+        earliest_price_change_per_game_region.old_price_cents as price_cents,
+        games.game_created_at as valid_from,
+        earliest_price_change_per_game_region.changed_at as valid_to
 
-        where earliest_price_change_per_game_region.old_price_cents is not null
+    from earliest_price_change_per_game_region
 
-    ),
+    inner join games
+        on earliest_price_change_per_game_region.game_id = games.game_id
 
-    -- Each change opens an interval; the next change (if any) closes it.
-    price_change_intervals as (
+    where earliest_price_change_per_game_region.old_price_cents is not null
 
-        select
-            price_changes.game_id,
-            price_changes.region,
-            price_changes.currency,
-            price_changes.new_price_cents as price_cents,
-            -- when the earliest change has no old_price_cents, it *is* the
-            -- initial price: extend it back to the game's creation.
-            case
-                when price_changes.changed_at = earliest_price_change_per_game_region.changed_at
-                    and earliest_price_change_per_game_region.old_price_cents is null
-                    then games.game_created_at
-                else price_changes.changed_at
-            end as valid_from,
+),
 
-            lead(price_changes.changed_at) over (
-                partition by price_changes.game_id, price_changes.region
-                order by price_changes.changed_at
-            ) as valid_to
+-- Each change opens an interval; the next change (if any) closes it.
+price_change_intervals as (
 
-        from price_changes
-        inner join
-            earliest_price_change_per_game_region
-            on price_changes.game_id = earliest_price_change_per_game_region.game_id
-            and price_changes.region = earliest_price_change_per_game_region.region
-        inner join games
-            on price_changes.game_id = games.game_id
+    select
+        price_changes.game_id,
+        price_changes.region,
+        price_changes.currency,
+        price_changes.new_price_cents as price_cents,
+        -- when the earliest change has no old_price_cents, it *is* the
+        -- initial price: extend it back to the game's creation.
+        case
+            when price_changes.changed_at = earliest_price_change_per_game_region.changed_at
+                and earliest_price_change_per_game_region.old_price_cents is null
+                then games.game_created_at
+            else price_changes.changed_at
+        end as valid_from,
 
-    ),
+        lead(price_changes.changed_at) over (
+            partition by price_changes.game_id, price_changes.region
+            order by price_changes.changed_at
+        ) as valid_to
 
-    -- game_id x region combos with no price_changes history at all.
-    game_regions_without_price_change_history as (
+    from price_changes
 
-        select
-            current_game_prices.game_id,
-            current_game_prices.region,
-            current_game_prices.currency,
-            current_game_prices.price_cents,
-            games.game_created_at as valid_from,
-            cast(null as timestamp_tz) as valid_to
+    inner join
+        earliest_price_change_per_game_region
+        on price_changes.game_id = earliest_price_change_per_game_region.game_id
+        and price_changes.region = earliest_price_change_per_game_region.region
 
-        from current_game_prices
-        inner join games
-            on current_game_prices.game_id = games.game_id
-        left join
-            price_changes
-            on current_game_prices.game_id = price_changes.game_id
-            and current_game_prices.region = price_changes.region
+    inner join games
+        on price_changes.game_id = games.game_id
 
-        where price_changes.game_id is null
+),
 
-    ),
+-- game_id x region combos with no price_changes history at all.
+game_regions_without_price_change_history as (
 
-    all_price_intervals_unioned as (
+    select
+        current_game_prices.game_id,
+        current_game_prices.region,
+        current_game_prices.currency,
+        current_game_prices.price_cents,
+        games.game_created_at as valid_from,
+        cast(null as timestamp_tz) as valid_to
 
-        select *
+    from current_game_prices
 
-        from initial_interval_from_price_change_history
+    inner join games
+        on current_game_prices.game_id = games.game_id
 
-        union all
+    left join
+        price_changes
+        on current_game_prices.game_id = price_changes.game_id
+        and current_game_prices.region = price_changes.region
 
-        select *
+    where price_changes.game_id is null
 
-        from price_change_intervals
+),
 
-        union all
+all_price_intervals_unioned as (
 
-        select *
+    select * from initial_interval_from_price_change_history
 
-        from game_regions_without_price_change_history
+    union all
 
-    ),
+    select * from price_change_intervals
 
-    final as (
+    union all
 
-        select
-            game_id,
-            region,
-            currency,
-            price_cents,
-            valid_from,
-            valid_to,
-            (valid_to is null) as is_current
+    select * from game_regions_without_price_change_history
 
-        from all_price_intervals_unioned
+),
 
-    )
+final as (
 
-select *
+    select
+        game_id,
+        region,
+        currency,
+        price_cents,
+        valid_from,
+        valid_to,
+        (valid_to is null) as is_current
 
-from final
+    from all_price_intervals_unioned
+
+)
+
+select * from final

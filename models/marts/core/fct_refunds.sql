@@ -5,59 +5,59 @@
 -- it inherits that charge's value. Filters is_deleted the same way
 -- fct_purchases does, so the two stay in lockstep on which purchases exist.
 with
-    refunds as (
 
-        select *
+refunds as (
 
-        from {{ ref('stg_steam__refunds') }}
+    select *
 
-        where not is_deleted
+    from {{ ref('stg_steam__refunds') }}
 
-    ),
+    where not is_deleted
 
-    purchases_with_fx as (
+),
 
-        select *
+purchases_with_fx as (
 
-        from {{ ref('int_purchases_with_fx') }}
+    select *
 
-        where not is_deleted
+    from {{ ref('int_purchases_with_fx') }}
 
-    ),
+    where not is_deleted
 
-    refunds_joined_to_purchases as (
+),
 
-        select
-            refunds.refund_id,
-            refunds.is_chargeback,
-            refunds.refunded_at,
-            purchases_with_fx.purchase_key,
-            purchases_with_fx.user_key,
-            purchases_with_fx.game_key,
-            purchases_with_fx.amount_usd as refunded_amount_usd
+refunds_joined_to_purchases as (
 
-        from refunds
-        inner join purchases_with_fx
-            on refunds.purchase_id = purchases_with_fx.purchase_id
+    select
+        refunds.refund_id,
+        refunds.is_chargeback,
+        refunds.refunded_at,
+        purchases_with_fx.purchase_key,
+        purchases_with_fx.user_key,
+        purchases_with_fx.game_key,
+        purchases_with_fx.amount_usd as refunded_amount_usd
 
-    ),
+    from refunds
 
-    final as (
+    inner join purchases_with_fx
+        on refunds.purchase_id = purchases_with_fx.purchase_id
 
-        select
-            {{ dbt_utils.generate_surrogate_key(['refund_id']) }} as refund_key,
-            purchase_key,
-            user_key,
-            game_key,
-            refunded_at,
-            refunded_at::date as refund_date,
-            is_chargeback,
-            refunded_amount_usd
+),
 
-        from refunds_joined_to_purchases
+final as (
 
-    )
+    select
+        {{ dbt_utils.generate_surrogate_key(['refund_id']) }} as refund_key,
+        purchase_key,
+        user_key,
+        game_key,
+        refunded_at,
+        refunded_at::date as refund_date,
+        is_chargeback,
+        refunded_amount_usd
 
-select *
+    from refunds_joined_to_purchases
 
-from final
+)
+
+select * from final

@@ -8,76 +8,84 @@
 -- here - only "attributed users" per the spec, unlike
 -- fct_marketing_signups_daily, which does bucket organic.
 with
-    marketing_campaigns as (
 
-        select marketing_campaign_key, channel
+marketing_campaigns as (
 
-        from {{ ref('dim_marketing_campaigns') }}
+    select
+        marketing_campaign_key,
+        channel
 
-    ),
+    from {{ ref('dim_marketing_campaigns') }}
 
-    attributed_users as (
+),
 
-        select user_key, marketing_campaign_key
+attributed_users as (
 
-        from {{ ref('int_users_campaign_attribution') }}
+    select
+        user_key,
+        marketing_campaign_key
 
-        where campaign_id is not null
+    from {{ ref('int_users_campaign_attribution') }}
 
-    ),
+    where campaign_id is not null
 
-    purchases as (
+),
 
-        select user_key, amount_usd
+purchases as (
 
-        from {{ ref('fct_purchases') }}
+    select
+        user_key,
+        amount_usd
 
-    ),
+    from {{ ref('fct_purchases') }}
 
-    revenue_by_user as (
+),
 
-        select user_key, sum(amount_usd) as revenue_usd
+revenue_by_user as (
 
-        from purchases
+    select
+        user_key,
+        sum(amount_usd) as revenue_usd
 
-        group by 1
+    from purchases
 
-    ),
+    group by 1
 
-    attributed_revenue as (
+),
 
-        select
-            attributed_users.marketing_campaign_key,
-            sum(revenue_by_user.revenue_usd) as attributed_revenue_usd
+attributed_revenue as (
 
-        from attributed_users
-        inner join revenue_by_user
-            on attributed_users.user_key = revenue_by_user.user_key
+    select
+        attributed_users.marketing_campaign_key,
+        sum(revenue_by_user.revenue_usd) as attributed_revenue_usd
 
-        group by 1
+    from attributed_users
 
-    ),
+    inner join revenue_by_user
+        on attributed_users.user_key = revenue_by_user.user_key
 
-    final as (
+    group by 1
 
-        select
-            {{
+),
+
+final as (
+
+    select
+        {{
             dbt_utils.generate_surrogate_key(
                 ['marketing_campaigns.marketing_campaign_key']
             )
         }} as marketing_campaign_revenue_key,
-            marketing_campaigns.marketing_campaign_key,
-            marketing_campaigns.channel,
-            coalesce(attributed_revenue.attributed_revenue_usd, 0) as attributed_revenue_usd
+        marketing_campaigns.marketing_campaign_key,
+        marketing_campaigns.channel,
+        coalesce(attributed_revenue.attributed_revenue_usd, 0) as attributed_revenue_usd
 
-        from marketing_campaigns
-        left join
-            attributed_revenue
-            on marketing_campaigns.marketing_campaign_key
-            = attributed_revenue.marketing_campaign_key
+    from marketing_campaigns
 
-    )
+    left join
+        attributed_revenue
+        on marketing_campaigns.marketing_campaign_key = attributed_revenue.marketing_campaign_key
 
-select *
+)
 
-from final
+select * from final

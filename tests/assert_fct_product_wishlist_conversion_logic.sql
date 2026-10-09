@@ -6,8 +6,9 @@
 -- game. Catches a regression that narrowed the grant source, added an
 -- upper bound to the window, or allowed a grant before the wishlist add to
 -- count.
+with
 
-with wishlist_items as (
+wishlist_items as (
 
     select
         wishlist_item_key,
@@ -36,12 +37,16 @@ wishlist_items_scored as (
         wishlist_items.game_key,
         (
             select count(*)
+
             from ownership_grants
+
             where
                 ownership_grants.user_key = wishlist_items.user_key
                 and ownership_grants.game_key = wishlist_items.game_key
                 and ownership_grants.granted_at > wishlist_items.added_at
-        ) > 0 as is_converted
+
+        )
+        > 0 as is_converted
 
     from wishlist_items
 
@@ -75,23 +80,22 @@ compared as (
 
     select
         coalesce(expected.game_key, actual.game_key) as game_key,
-        coalesce(expected.expected_wishlist_add_count, 0)
-            as expected_wishlist_add_count,
-        coalesce(actual.actual_wishlist_add_count, 0)
-            as actual_wishlist_add_count,
-        coalesce(expected.expected_converted_count, 0)
-            as expected_converted_count,
-        coalesce(actual.actual_converted_count, 0)
-            as actual_converted_count
+        coalesce(expected.expected_wishlist_add_count, 0) as expected_wishlist_add_count,
+        coalesce(actual.actual_wishlist_add_count, 0) as actual_wishlist_add_count,
+        coalesce(expected.expected_converted_count, 0) as expected_converted_count,
+        coalesce(actual.actual_converted_count, 0) as actual_converted_count
 
     from expected
+
     full outer join actual
         on expected.game_key = actual.game_key
 
 )
 
 select *
+
 from compared
+
 where
     expected_wishlist_add_count <> actual_wishlist_add_count
     or expected_converted_count <> actual_converted_count

@@ -4,8 +4,9 @@
 -- fct_marketing_signups_daily reports per signup_date x channel. Catches a
 -- regression that dropped a user, miscounted organic (NULL campaign_id), or
 -- mapped a campaign to the wrong channel.
+with
 
-with users as (
+users as (
 
     select
         signup_date,
@@ -33,10 +34,12 @@ expected as (
         count(*) as expected_signup_count
 
     from users
+
     left join marketing_campaigns
         on users.campaign_id = marketing_campaigns.marketing_campaign_id
 
-    group by 1, 2
+    group by 1,
+        2
 
 ),
 
@@ -56,18 +59,18 @@ compared as (
     select
         coalesce(expected.signup_date, actual.signup_date) as signup_date,
         coalesce(expected.channel, actual.channel) as channel,
-        coalesce(expected.expected_signup_count, 0)
-            as expected_signup_count,
+        coalesce(expected.expected_signup_count, 0) as expected_signup_count,
         coalesce(actual.actual_signup_count, 0) as actual_signup_count
 
     from expected
-    full outer join actual
-        on
-            expected.signup_date = actual.signup_date
-            and expected.channel = actual.channel
+
+    full outer join
+        actual on expected.signup_date = actual.signup_date and expected.channel = actual.channel
 
 )
 
 select *
+
 from compared
+
 where expected_signup_count <> actual_signup_count

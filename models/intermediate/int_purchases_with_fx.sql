@@ -5,61 +5,61 @@
 -- independently. Left unfiltered by is_deleted - each consumer decides
 -- whether a deleted purchase belongs in its own grain.
 with
-    purchases as (
 
-        select * from {{ ref('stg_steam__purchases') }}
+purchases as (
 
-    ),
+    select * from {{ ref('stg_steam__purchases') }}
 
-    fx_rates as (
+),
 
-        select * from {{ ref('fx_rates') }}
+fx_rates as (
 
-    ),
+    select * from {{ ref('fx_rates') }}
 
-    purchases_with_fx as (
+),
 
-        select
-            purchases.purchase_id,
-            purchases.user_id,
-            purchases.game_id,
-            purchases.amount_cents,
-            purchases.currency,
-            purchases.payment_method,
-            purchases.purchased_at,
-            purchases.is_deleted,
-            fx_rates.rate_to_usd
+purchases_with_fx as (
 
-        from purchases
-        left join
-            fx_rates
-            on purchases.purchased_at::date = fx_rates.date
-            and purchases.currency = fx_rates.currency
+    select
+        purchases.purchase_id,
+        purchases.user_id,
+        purchases.game_id,
+        purchases.amount_cents,
+        purchases.currency,
+        purchases.payment_method,
+        purchases.purchased_at,
+        purchases.is_deleted,
+        fx_rates.rate_to_usd
 
-    ),
+    from purchases
 
-    final as (
+    left join
+        fx_rates
+        on purchases.purchased_at::date = fx_rates.date
+        and purchases.currency = fx_rates.currency
 
-        select
-            purchase_id,
+),
 
-            {{ dbt_utils.generate_surrogate_key(['purchase_id']) }} as purchase_key,
+final as (
 
-            {{ dbt_utils.generate_surrogate_key(['user_id']) }} as user_key,
+    select
+        purchase_id,
 
-            {{ dbt_utils.generate_surrogate_key(['game_id']) }} as game_key,
-            purchased_at,
-            purchased_at::date as purchase_date,
-            amount_cents,
-            currency,
-            amount_cents / 100.0 * rate_to_usd as amount_usd,
-            payment_method,
-            is_deleted
+        {{ dbt_utils.generate_surrogate_key(['purchase_id']) }} as purchase_key,
 
-        from purchases_with_fx
+        {{ dbt_utils.generate_surrogate_key(['user_id']) }} as user_key,
 
-    )
+        {{ dbt_utils.generate_surrogate_key(['game_id']) }} as game_key,
+        purchased_at,
+        purchased_at::date as purchase_date,
+        amount_cents,
+        currency,
+        amount_cents / 100.0 * rate_to_usd as amount_usd,
+        payment_method,
+        is_deleted
 
-select *
+    from purchases_with_fx
 
-from final
+)
+
+select * from final

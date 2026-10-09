@@ -3,47 +3,53 @@
 -- across all games per snapshot_at, then take the max of that per-snapshot
 -- total within each snapshot_date (issue #18).
 with
-    concurrent_player_snapshots as (
 
-        select snapshot_at, snapshot_date, player_count
+concurrent_player_snapshots as (
 
-        from {{ ref('fct_concurrent_player_snapshots') }}
+    select
+        snapshot_at,
+        snapshot_date,
+        player_count
 
-    ),
+    from {{ ref('fct_concurrent_player_snapshots') }}
 
-    platform_totals_per_snapshot as (
+),
 
-        select snapshot_at, snapshot_date, sum(player_count) as total_concurrent_players
+platform_totals_per_snapshot as (
 
-        from concurrent_player_snapshots
+    select
+        snapshot_at,
+        snapshot_date,
+        sum(player_count) as total_concurrent_players
 
-        group by 1,
-            2
+    from concurrent_player_snapshots
 
-    ),
+    group by 1,
+        2
 
-    daily_peak as (
+),
 
-        select
-            snapshot_date as capacity_date, max(total_concurrent_players) as peak_concurrent_players
+daily_peak as (
 
-        from platform_totals_per_snapshot
+    select
+        snapshot_date as capacity_date,
+        max(total_concurrent_players) as peak_concurrent_players
 
-        group by 1
+    from platform_totals_per_snapshot
 
-    ),
+    group by 1
 
-    final as (
+),
 
-        select
-            capacity_date,
-            {{ dbt_utils.generate_surrogate_key(['capacity_date']) }} as finance_capacity_daily_key,
-            peak_concurrent_players
+final as (
 
-        from daily_peak
+    select
+        capacity_date,
+        {{ dbt_utils.generate_surrogate_key(['capacity_date']) }} as finance_capacity_daily_key,
+        peak_concurrent_players
 
-    )
+    from daily_peak
 
-select *
+)
 
-from final
+select * from final

@@ -7,25 +7,32 @@
 }}
 
 with
-    information_schema_tables as (
 
-        select table_schema as schema_name, table_name, row_count, current_date() as snapshot_date
+information_schema_tables as (
 
-        from information_schema.tables
+    select
+        table_schema as schema_name,
+        table_name,
+        row_count,
+        current_date() as snapshot_date
 
-        where table_type = 'BASE TABLE'
-            and table_schema != 'ELEMENTARY'
+    from information_schema.tables
 
-    ),
+    where table_type = 'BASE TABLE'
+        and table_schema != 'ELEMENTARY'
 
-    final as (
+),
 
-        select schema_name, table_name, snapshot_date, row_count
+final as (
 
-        from information_schema_tables
+    select
+        schema_name,
+        table_name,
+        snapshot_date,
+        row_count
 
-    )
+    from information_schema_tables
 
-select *
+)
 
-from final
+select * from final

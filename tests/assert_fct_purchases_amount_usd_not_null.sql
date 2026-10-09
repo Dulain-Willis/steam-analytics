@@ -2,13 +2,17 @@
 -- is populated. fct_purchases left-joins fx_rates, so a missing FX rate for
 -- a (date, currency) pair shows up here as a null amount_usd instead of
 -- passing silently.
+with
 
-with purchases as (
+purchases as (
 
     select * from {{ ref('fct_purchases') }}
 
 )
 
 select *
+
 from purchases
-where currency is not null and amount_usd is null
+
+where currency is not null
+    and amount_usd is null
