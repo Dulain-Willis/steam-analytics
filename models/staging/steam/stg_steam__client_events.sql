@@ -2,20 +2,21 @@
 -- steam.client_events landing table. No joins, no business logic. Primary
 -- key is event_id (not id) for this table.
 with
-    source as (
 
-        select *
+source as (
 
-        from {{ source('steam', 'client_events') }}
+    select *
 
-        qualify
-            row_number() over (
-                partition by event_id
-                order by record_metadata:offset::number desc
-            )
-            = 1
+    from {{ source('steam', 'client_events') }}
 
-    )
+    qualify
+        row_number() over (
+            partition by event_id
+            order by record_metadata:offset::number desc
+        )
+        = 1
+
+)
 
 select
     event_id,

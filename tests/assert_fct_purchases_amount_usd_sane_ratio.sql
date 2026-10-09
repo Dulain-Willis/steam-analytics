@@ -3,11 +3,16 @@
 -- amount_usd / (amount_cents / 100) should be a plausible currency rate.
 -- Catches gross FX-join errors (wrong join grain, missing /100, fanned-out
 -- duplicate rate rows) rather than validating exact rates.
+with
 
-with purchases as (
+purchases as (
 
-    select * from {{ ref('fct_purchases') }}
-    where amount_usd is not null and amount_cents <> 0
+    select *
+
+    from {{ ref('fct_purchases') }}
+
+    where amount_usd is not null
+        and amount_cents <> 0
 
 ),
 
@@ -22,5 +27,8 @@ with_implied_rate as (
 )
 
 select *
+
 from with_implied_rate
-where implied_rate_to_usd not between 0.0001 and 10
+
+where implied_rate_to_usd not between 0.0001
+    and 10

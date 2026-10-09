@@ -2,20 +2,21 @@
 -- steam.concurrent_player_snapshots landing table. No joins, no business
 -- logic.
 with
-    source as (
 
-        select *
+source as (
 
-        from {{ source('steam', 'concurrent_player_snapshots') }}
+    select *
 
-        qualify
-            row_number() over (
-                partition by id
-                order by record_metadata:offset::number desc
-            )
-            = 1
+    from {{ source('steam', 'concurrent_player_snapshots') }}
 
-    )
+    qualify
+        row_number() over (
+            partition by id
+            order by record_metadata:offset::number desc
+        )
+        = 1
+
+)
 
 select
     id as concurrent_player_snapshot_id,

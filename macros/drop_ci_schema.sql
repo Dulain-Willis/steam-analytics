@@ -4,12 +4,11 @@
     so it doesn't stick around. The db and schema are passedin as env 
     vars in the workflow code itself.
 #}
-
 {% macro drop_ci_schema() %}
     {% set drop_schema_sql %}
         drop schema if exists {{ target.database }}.{{ target.schema }}
     {% endset %}
-   
+
     {% do run_query(drop_schema_sql) %}
     {{ log("Dropped schema " ~ target.schema, info=True) }}
 {% endmacro %}
