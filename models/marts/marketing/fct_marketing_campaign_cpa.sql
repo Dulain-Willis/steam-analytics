@@ -5,68 +5,66 @@
 -- (issue #22). cpa_usd is null when a campaign has zero attributed
 -- signups - an undefined ratio (spend with no signups is a very bad CPA,
 -- not a free $0 one), not div0'd to a misleading 0.
+with
+    marketing_campaigns as (
 
-with marketing_campaigns as (
+        select marketing_campaign_key, channel, spend_cents
 
-    select
-        marketing_campaign_key,
-        channel,
-        spend_cents
+        from {{ ref('dim_marketing_campaigns') }}
 
-    from {{ ref('dim_marketing_campaigns') }}
+    ),
 
-),
+    attributed_users as (
 
-attributed_users as (
+        select marketing_campaign_key
 
-    select marketing_campaign_key
-    from {{ ref('int_users_campaign_attribution') }}
-    where campaign_id is not null
+        from {{ ref('int_users_campaign_attribution') }}
 
-),
+        where campaign_id is not null
 
-attributed_signups as (
+    ),
 
-    select
-        marketing_campaign_key,
-        count(*) as attributed_signup_count
+    attributed_signups as (
 
-    from attributed_users
+        select marketing_campaign_key, count(*) as attributed_signup_count
 
-    group by 1
+        from attributed_users
 
-),
+        group by 1
 
-final as (
+    ),
 
-    select
-        {{
+    final as (
+
+        select
+            {{
             dbt_utils.generate_surrogate_key(
                 ['marketing_campaigns.marketing_campaign_key']
             )
         }} as marketing_campaign_cpa_key,
-        
-        marketing_campaigns.marketing_campaign_key,
-        marketing_campaigns.channel,
-        marketing_campaigns.spend_cents,
 
-        coalesce(
-            attributed_signups.attributed_signup_count, 0
-          ) as attributed_signup_count,
+            marketing_campaigns.marketing_campaign_key,
+            marketing_campaigns.channel,
+            marketing_campaigns.spend_cents,
 
-        case
-            when coalesce(attributed_signups.attributed_signup_count, 0) = 0
-                then null
-            else
-                marketing_campaigns.spend_cents / 100.0
-                / attributed_signups.attributed_signup_count
-        end as cpa_usd
+            coalesce(attributed_signups.attributed_signup_count, 0) as attributed_signup_count,
 
-    from marketing_campaigns
-    left join attributed_signups
-        on marketing_campaigns.marketing_campaign_key
-        = attributed_signups.marketing_campaign_key
+            case
+                when coalesce(attributed_signups.attributed_signup_count, 0) = 0 then null
+                else
+                    marketing_campaigns.spend_cents
+                    / 100.0
+                    / attributed_signups.attributed_signup_count
+            end as cpa_usd
 
-)
+        from marketing_campaigns
+        left join
+            attributed_signups
+            on marketing_campaigns.marketing_campaign_key
+            = attributed_signups.marketing_campaign_key
 
-select * from final
+    )
+
+select *
+
+from final

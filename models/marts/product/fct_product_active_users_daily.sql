@@ -6,66 +6,61 @@
 -- distinct count (the day itself plus the prior 6), global with no cohort
 -- split (issue #19 - that segmentation lives in
 -- fct_product_session_length_daily instead).
+with
+    playtime_sessions as (
 
-with playtime_sessions as (
+        select distinct started_date, user_key
 
-    select distinct
-        started_date,
-        user_key
+        from {{ ref('fct_playtime_sessions') }}
 
-    from {{ ref('fct_playtime_sessions') }}
+    ),
 
-),
+    active_dates as (
 
-active_dates as (
+        select distinct started_date as active_date
 
-    select distinct started_date as active_date from playtime_sessions
+        from playtime_sessions
 
-),
+    ),
 
-dau as (
+    dau as (
 
-    select
-        started_date as active_date,
-        count(distinct user_key) as dau
+        select started_date as active_date, count(distinct user_key) as dau
 
-    from playtime_sessions
+        from playtime_sessions
 
-    group by 1
+        group by 1
 
-),
+    ),
 
-wau as (
+    wau as (
 
-    select
-        active_dates.active_date,
-        count(distinct playtime_sessions.user_key) as wau
+        select active_dates.active_date, count(distinct playtime_sessions.user_key) as wau
 
-    from active_dates
-    inner join playtime_sessions
-        on
-            active_dates.active_date >= playtime_sessions.started_date
-            and active_dates.active_date
-            < dateadd('day', 7, playtime_sessions.started_date)
+        from active_dates
+        inner join
+            playtime_sessions
+            on active_dates.active_date >= playtime_sessions.started_date
+            and active_dates.active_date < dateadd('day', 7, playtime_sessions.started_date)
 
-    group by 1
+        group by 1
 
-),
+    ),
 
-final as (
+    final as (
 
-    select
-        dau.active_date,
-        {{
-            dbt_utils.generate_surrogate_key(['dau.active_date'])
-        }} as active_users_daily_key,
-        dau.dau,
-        wau.wau
+        select
+            dau.active_date,
+            {{ dbt_utils.generate_surrogate_key(['dau.active_date']) }} as active_users_daily_key,
+            dau.dau,
+            wau.wau
 
-    from dau
-    inner join wau
-        on dau.active_date = wau.active_date
+        from dau
+        inner join wau
+            on dau.active_date = wau.active_date
 
-)
+    )
 
-select * from final
+select *
+
+from final

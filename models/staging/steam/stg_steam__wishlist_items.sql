@@ -1,15 +1,20 @@
 -- stg_steam__wishlist_items: cast/rename/offset-dedupe over the
 -- steam.wishlist_items landing table. No joins, no business logic.
+with
+    source as (
 
-with source as (
+        select *
 
-    select * from {{ source('steam', 'wishlist_items') }}
-    qualify row_number() over (
-        partition by id
-        order by record_metadata:offset::number desc
-    ) = 1
+        from {{ source('steam', 'wishlist_items') }}
 
-)
+        qualify
+            row_number() over (
+                partition by id
+                order by record_metadata:offset::number desc
+            )
+            = 1
+
+    )
 
 select
     id as wishlist_item_id,
