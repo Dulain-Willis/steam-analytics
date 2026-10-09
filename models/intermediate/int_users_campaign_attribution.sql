@@ -4,42 +4,38 @@
 -- place this coalesce happens; it is never materialized as a fake row in
 -- dim_marketing_campaigns (CONTEXT.md). Shared by every marts/marketing
 -- fact that needs a user's channel or campaign attribution (issue #22).
+with
+    users as (
 
-with users as (
+        select user_key, signup_date, campaign_id
 
-    select
-        user_key,
-        signup_date,
-        campaign_id
+        from {{ ref('dim_users') }}
 
-    from {{ ref('dim_users') }}
+    ),
 
-),
+    marketing_campaigns as (
 
-marketing_campaigns as (
+        select marketing_campaign_key, marketing_campaign_id, channel
 
-    select
-        marketing_campaign_key,
-        marketing_campaign_id,
-        channel
+        from {{ ref('dim_marketing_campaigns') }}
 
-    from {{ ref('dim_marketing_campaigns') }}
+    ),
 
-),
+    final as (
 
-final as (
+        select
+            users.user_key,
+            users.signup_date,
+            users.campaign_id,
+            marketing_campaigns.marketing_campaign_key,
+            coalesce(marketing_campaigns.channel, 'organic') as channel
 
-    select
-        users.user_key,
-        users.signup_date,
-        users.campaign_id,
-        marketing_campaigns.marketing_campaign_key,
-        coalesce(marketing_campaigns.channel, 'organic') as channel
+        from users
+        left join
+            marketing_campaigns on users.campaign_id = marketing_campaigns.marketing_campaign_id
 
-    from users
-    left join marketing_campaigns
-        on users.campaign_id = marketing_campaigns.marketing_campaign_id
+    )
 
-)
+select *
 
-select * from final
+from final

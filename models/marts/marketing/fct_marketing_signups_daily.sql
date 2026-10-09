@@ -2,35 +2,36 @@
 -- resolution (NULL campaign_id -> 'organic') lives in
 -- int_users_campaign_attribution, shared with the CPA/revenue facts
 -- (issue #22).
+with
+    users_campaign_attribution as (
 
-with users_campaign_attribution as (
+        select signup_date, channel
 
-    select
-        signup_date,
-        channel
+        from {{ ref('int_users_campaign_attribution') }}
 
-    from {{ ref('int_users_campaign_attribution') }}
+    ),
 
-),
+    final as (
 
-final as (
+        select
+            signup_date,
+            channel,
 
-    select
-        signup_date,
-        channel,
-
-        {{
+            {{
             dbt_utils.generate_surrogate_key(
                 ['signup_date', 'channel']
             )
         }} as marketing_signups_daily_key,
 
-        count(*) as signup_count
+            count(*) as signup_count
 
-    from users_campaign_attribution
+        from users_campaign_attribution
 
-    group by 1, 2
+        group by 1,
+            2
 
-)
+    )
 
-select * from final
+select *
+
+from final

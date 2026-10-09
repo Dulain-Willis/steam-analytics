@@ -1,15 +1,20 @@
 -- stg_steam__price_changes: cast/rename/offset-dedupe over the
 -- steam.price_changes landing table. No joins, no business logic.
+with
+    source as (
 
-with source as (
+        select *
 
-    select * from {{ source('steam', 'price_changes') }}
-    qualify row_number() over (
-        partition by id
-        order by record_metadata:offset::number desc
-    ) = 1
+        from {{ source('steam', 'price_changes') }}
 
-)
+        qualify
+            row_number() over (
+                partition by id
+                order by record_metadata:offset::number desc
+            )
+            = 1
+
+    )
 
 select
     id as price_change_id,

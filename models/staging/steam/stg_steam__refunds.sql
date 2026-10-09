@@ -1,15 +1,20 @@
 -- stg_steam__refunds: cast/rename/offset-dedupe over the steam.refunds
 -- landing table. No joins, no business logic.
+with
+    source as (
 
-with source as (
+        select *
 
-    select * from {{ source('steam', 'refunds') }}
-    qualify row_number() over (
-        partition by id
-        order by record_metadata:offset::number desc
-    ) = 1
+        from {{ source('steam', 'refunds') }}
 
-)
+        qualify
+            row_number() over (
+                partition by id
+                order by record_metadata:offset::number desc
+            )
+            = 1
+
+    )
 
 select
     id as refund_id,

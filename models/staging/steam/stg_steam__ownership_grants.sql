@@ -1,15 +1,20 @@
 -- stg_steam__ownership_grants: cast/rename/offset-dedupe over the
 -- steam.ownership_grants landing table. No joins, no business logic.
+with
+    source as (
 
-with source as (
+        select *
 
-    select * from {{ source('steam', 'ownership_grants') }}
-    qualify row_number() over (
-        partition by id
-        order by record_metadata:offset::number desc
-    ) = 1
+        from {{ source('steam', 'ownership_grants') }}
 
-)
+        qualify
+            row_number() over (
+                partition by id
+                order by record_metadata:offset::number desc
+            )
+            = 1
+
+    )
 
 select
     id as ownership_grant_id,

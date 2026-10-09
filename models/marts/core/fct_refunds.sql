@@ -4,52 +4,60 @@
 -- recomputing an FX conversion - a refund reverses the original charge, so
 -- it inherits that charge's value. Filters is_deleted the same way
 -- fct_purchases does, so the two stay in lockstep on which purchases exist.
+with
+    refunds as (
 
-with refunds as (
+        select *
 
-    select * from {{ ref('stg_steam__refunds') }}
-    where not is_deleted
+        from {{ ref('stg_steam__refunds') }}
 
-),
+        where not is_deleted
 
-purchases_with_fx as (
+    ),
 
-    select * from {{ ref('int_purchases_with_fx') }}
-    where not is_deleted
+    purchases_with_fx as (
 
-),
+        select *
 
-refunds_joined_to_purchases as (
+        from {{ ref('int_purchases_with_fx') }}
 
-    select
-        refunds.refund_id,
-        refunds.is_chargeback,
-        refunds.refunded_at,
-        purchases_with_fx.purchase_key,
-        purchases_with_fx.user_key,
-        purchases_with_fx.game_key,
-        purchases_with_fx.amount_usd as refunded_amount_usd
+        where not is_deleted
 
-    from refunds
-    inner join purchases_with_fx
-        on refunds.purchase_id = purchases_with_fx.purchase_id
+    ),
 
-),
+    refunds_joined_to_purchases as (
 
-final as (
+        select
+            refunds.refund_id,
+            refunds.is_chargeback,
+            refunds.refunded_at,
+            purchases_with_fx.purchase_key,
+            purchases_with_fx.user_key,
+            purchases_with_fx.game_key,
+            purchases_with_fx.amount_usd as refunded_amount_usd
 
-    select
-        {{ dbt_utils.generate_surrogate_key(['refund_id']) }} as refund_key,
-        purchase_key,
-        user_key,
-        game_key,
-        refunded_at,
-        refunded_at::date as refund_date,
-        is_chargeback,
-        refunded_amount_usd
+        from refunds
+        inner join purchases_with_fx
+            on refunds.purchase_id = purchases_with_fx.purchase_id
 
-    from refunds_joined_to_purchases
+    ),
 
-)
+    final as (
 
-select * from final
+        select
+            {{ dbt_utils.generate_surrogate_key(['refund_id']) }} as refund_key,
+            purchase_key,
+            user_key,
+            game_key,
+            refunded_at,
+            refunded_at::date as refund_date,
+            is_chargeback,
+            refunded_amount_usd
+
+        from refunds_joined_to_purchases
+
+    )
+
+select *
+
+from final
