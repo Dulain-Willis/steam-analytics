@@ -17,7 +17,9 @@ jobs:
       SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
       SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
       SNOWFLAKE_ROLE: ${{ secrets.SNOWFLAKE_ROLE }}
-      SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
+      # `|| 'COMPUTE_WH'` because an absent secret arrives as the empty
+      # string, not as unset, so profiles.yml's default would never apply.
+      SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE || 'COMPUTE_WH' }}
       SNOWFLAKE_DATABASE: ${{ secrets.SNOWFLAKE_DATABASE  }}
 
     steps:
@@ -62,6 +64,7 @@ jobs:
       SNOWFLAKE_ACCOUNT: dummy
       SNOWFLAKE_USER: dummy
       SNOWFLAKE_DATABASE: dummy
+      SNOWFLAKE_ROLE: dummy
       SNOWFLAKE_PRIVATE_KEY_PATH: dummy
 
     steps:
