@@ -40,8 +40,12 @@ writing the bare layer names into whatever database the target points at.
 to the empty string, so the check lives in the macro where the final value is
 visible.
 
-The `staging` target does not exist yet (steam-infra #119 adds it); the macro
-treats it as a bare-name target already.
+Both deployed targets now exist and `scripts/schema_naming_test.sh` asserts
+them together — same layer schemas, different database — so "staging is laid
+out identically to prod" is checked rather than claimed. The same pair of
+target names appears in `dbt_project.yml`'s `on-run-end`, which is what makes
+elementary run in the deployed environments and nowhere else; adding a third
+deployed environment means editing both.
 
 `scripts/schema_naming_test.sh` asserts all of the above through
 `dbt parse`'s manifest, with no Snowflake connection.

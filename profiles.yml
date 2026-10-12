@@ -13,13 +13,20 @@
 #                 SNOWFLAKE_PRIVATE_KEY_PATH at the .p8 file.
 #   - ci        : key stored as a GitHub Actions secret, written to a temp
 #                 file by the workflow, SNOWFLAKE_PRIVATE_KEY_PATH points at it.
-#   - prod      : k8s Secret (RSA key-pair) injected as the
+#   - staging,
+#     prod      : k8s Secret (RSA key-pair) injected as the
 #                 SNOWFLAKE_PRIVATE_KEY env var (raw PEM content, no file) on
 #                 the Cosmos/Airflow pod on steam-infra's EKS, mirroring
 #                 steam-infra #43's Secret pattern. Wired in Phase 11
 #                 (Orchestration). dbt-snowflake's Connections class accepts
 #                 either `private_key` (content) or `private_key_path` (file)
-#                 -- content is simpler here, no volume mount needed.
+#                 -- content is simpler here, no volume mount needed. Each
+#                 environment has its own Snowflake service user and its own
+#                 Secret in its own namespace; the Secret's *name* is the same
+#                 in both, so the Helm overlays are identical here.
+#                 It must hold the full PKCS#8 PEM, headers and newlines
+#                 intact -- dbt-snowflake rejects PKCS#1 and headerless keys,
+#                 and that failure only surfaces at run time.
 #
 # Required env vars (all targets):
 #   SNOWFLAKE_ACCOUNT, SNOWFLAKE_USER, SNOWFLAKE_DATABASE, SNOWFLAKE_ROLE
@@ -27,14 +34,17 @@
 #           developer schema prefix — no default; see .env.example)
 #   ci:     SNOWFLAKE_PRIVATE_KEY_PATH (file), DBT_CI_SCHEMA (the PR's
 #           schema prefix, ci_pr_<N> — also no default)
+#   staging,
 #   prod:   SNOWFLAKE_PRIVATE_KEY (content)
 #
 # SNOWFLAKE_ROLE has no default on purpose. It used to fall back to
 # TRANSFORMER / TRANSFORMING, neither of which exists in the account, so an
 # unset variable produced an obscure "role does not exist" at connect time
 # instead of saying which variable was missing. The real names are
-# TRANSFORMER_PROD for prod (steam-infra's k8s/airflow/values.yaml sets it)
-# and, from steam-infra #115/#116, DEVELOPER for dev and CI for ci.
+# TRANSFORMER_PROD for prod
+# (steam-infra's k8s/airflow/values-prod.yaml sets it), TRANSFORMER_STAGING
+# for staging, and, from steam-infra #115/#116, DEVELOPER for dev and CI for
+# ci.
 #
 # Caveat: that only fails loudly when the variable is genuinely *unset*.
 # env_var raises on unset, not on empty, and a GitHub Actions secret that
@@ -50,11 +60,12 @@
 #
 # On prefixing targets (anything but prod and staging) the schema is not a
 # fallback: macros/generate_schema_name.sql prefixes every layer with it, so
-# dev writes <SNOWFLAKE_SCHEMA>_stg and ci writes <DBT_CI_SCHEMA>_stg. On prod
-# it really is just the fallback for models with no +schema config.
+# dev writes <SNOWFLAKE_SCHEMA>_stg and ci writes <DBT_CI_SCHEMA>_stg. On
+# staging and prod it really is just the fallback for models with no +schema
+# config.
 #
 # Optional:
-#   SNOWFLAKE_SCHEMA (prod only -- see above),
+#   SNOWFLAKE_SCHEMA (staging and prod only -- see above),
 #   SNOWFLAKE_WAREHOUSE (default COMPUTE_WH, the account's only one),
 #   DBT_THREADS,
 #   DBT_ENV_SECRET_SNOWFLAKE_KEY_PASSPHRASE (only if the key is encrypted)
@@ -93,6 +104,24 @@ steam_analytics:
       private_key_path: "{{ env_var('SNOWFLAKE_PRIVATE_KEY_PATH') }}"
       private_key_passphrase: "{{ env_var('DBT_ENV_SECRET_SNOWFLAKE_KEY_PASSPHRASE', '') }}"
       threads: "{{ env_var('DBT_THREADS', '4') | int }}"
+
+    # Staging mirrors prod exactly: same key form (content, from the
+    # namespace's snowflake-keypair Secret), same bare layer schema names,
+    # different database and role. The point of the environment is to be
+    # prod-like, so any difference between these two blocks beyond `database`
+    # and `role` — both of which come from env vars anyway — is a way for
+    # staging to pass and prod to fail.
+    staging:
+      type: snowflake
+      account: "{{ env_var('SNOWFLAKE_ACCOUNT') }}"
+      user: "{{ env_var('SNOWFLAKE_USER') }}"
+      role: "{{ env_var('SNOWFLAKE_ROLE') }}"
+      warehouse: "{{ env_var('SNOWFLAKE_WAREHOUSE', 'COMPUTE_WH') }}"
+      database: "{{ env_var('SNOWFLAKE_DATABASE') }}"
+      schema: "{{ env_var('SNOWFLAKE_SCHEMA', 'staging') }}"
+      private_key: "{{ env_var('SNOWFLAKE_PRIVATE_KEY') }}"
+      private_key_passphrase: "{{ env_var('DBT_ENV_SECRET_SNOWFLAKE_KEY_PASSPHRASE', '') }}"
+      threads: "{{ env_var('DBT_THREADS', '8') | int }}"
 
     prod:
       type: snowflake
