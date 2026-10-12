@@ -105,23 +105,50 @@ check "the two sets are the same size" \
   "$([[ "$(wc -l <<<"$alice")" == "$(wc -l <<<"$bob")" ]] && echo 0 || echo 1)" \
   "alice: $(wc -l <<<"$alice") bob: $(wc -l <<<"$bob")"
 
-# --- 3. prod: bare layer schema names in STEAM_PROD ------------------------
+# --- 3. the deployed environments: bare layer schema names -----------------
+#
+# One loop over staging and prod rather than two blocks, because "staging is a
+# faithful copy of prod's layout" is the AC: anything asserted of one and not
+# the other is a way for the two to drift. The *only* difference permitted is
+# the database, which is why that is the loop variable.
+#
+# This is also where #115's claim that the macro was "already correct when
+# staging exists" gets checked rather than taken on trust.
 
-out=$(parse prod SNOWFLAKE_DATABASE=STEAM_PROD SNOWFLAKE_SCHEMA=prod)
-check "prod target parses" "$?" "$out"
-prod=$(relations "$WORK/prod/manifest.json")
+for env in staging prod; do
+  db=$([[ $env == staging ]] && echo STEAM_STAGING || echo STEAM_PROD)
+  out=$(parse "$env" SNOWFLAKE_DATABASE="$db" SNOWFLAKE_SCHEMA="$env")
+  check "$env target parses" "$?" "$out"
+  built=$(relations "$WORK/$env/manifest.json")
 
-expected_prod=$(
-  printf 'STEAM_PROD.%s\n' elementary int marts_core marts_finance \
-    marts_marketing marts_product prod stg | sort
-)
-check "prod builds exactly the bare layer schemas in STEAM_PROD" \
-  "$([[ "$(sort <<<"$prod")" == "$expected_prod" ]] && echo 0 || echo 1)" \
-  "$(diff <(sort <<<"$prod") <(echo "$expected_prod"))"
+  expected=$(
+    printf '%s\n' elementary int marts_core marts_finance \
+      marts_marketing marts_product "$env" stg | sed "s|^|$db.|" | sort
+  )
+  check "$env builds exactly the bare layer schemas in $db" \
+    "$([[ "$(sort <<<"$built")" == "$expected" ]] && echo 0 || echo 1)" \
+    "$(diff <(sort <<<"$built") <(echo "$expected"))"
 
-# The staging target does not exist yet — steam-infra #119 adds it — so the
-# macro's bare-name branch is asserted here through prod only. When staging
-# lands, add it to this block: the macro already treats the two alike.
+  # The other direction, and the one the grant check cannot see: a staging
+  # build must name nothing in prod's database, and vice versa.
+  others=$(grep -vE "^$db\." <<<"$built")
+  check "$env writes nothing outside $db" \
+    "$([[ -z "$others" ]] && echo 0 || echo 1)" "$others"
+
+  srcs=$(jq -r '[.sources[] | .database] | unique | .[]' "$WORK/$env/manifest.json")
+  check "$env reads sources from STEAM_RAW" \
+    "$([[ "$srcs" == "STEAM_RAW" ]] && echo 0 || echo 1)" "$srcs"
+done
+
+# And the two are the same layout, not merely each self-consistent: the same
+# schema names in different databases. Compared by stripping the database, so
+# a layer that exists in prod and not staging fails here even though both
+# blocks above passed.
+staging_layers=$(relations "$WORK/staging/manifest.json" | sed 's/^STEAM_STAGING\.//' | grep -v '^staging$' | sort)
+prod_layers=$(relations "$WORK/prod/manifest.json" | sed 's/^STEAM_PROD\.//' | grep -v '^prod$' | sort)
+check "staging and prod build the same layer schemas" \
+  "$([[ "$staging_layers" == "$prod_layers" ]] && echo 0 || echo 1)" \
+  "$(diff <(echo "$staging_layers") <(echo "$prod_layers"))"
 
 # --- 4. the dev schema is required, not defaulted --------------------------
 
