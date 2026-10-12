@@ -32,10 +32,22 @@
 # instead of saying which variable was missing. The real names are
 # TRANSFORMER_PROD for prod (steam-infra's k8s/airflow/values.yaml sets it)
 # and, from steam-infra #115/#116, DEVELOPER for dev and CI for ci.
-# SNOWFLAKE_DATABASE is the database this target *builds into*; sources read
-# the raw database, which models/staging/steam/_steam__sources.yml names.
+#
+# Caveat: that only fails loudly when the variable is genuinely *unset*.
+# env_var raises on unset, not on empty, and a GitHub Actions secret that
+# does not exist arrives as the empty string -- so in the workflows a missing
+# SNOWFLAKE_ROLE secret still yields a session with no role rather than a
+# named error. The workflows' Snowflake identities are rewired in
+# steam-infra #116; fixing it properly belongs there.
+#
+# SNOWFLAKE_DATABASE is the database this target *builds into*. Sources read
+# the raw database instead, from their own SNOWFLAKE_RAW_DATABASE and
+# SNOWFLAKE_SOURCE_SCHEMA (defaults STEAM_RAW / STEAM_RDS) -- see
+# models/staging/steam/_steam__sources.yml.
 #
 # Optional:
+#   SNOWFLAKE_SCHEMA (dev and prod only -- a fallback for models with no
+#     +schema config; real schemas come from macros/generate_schema_name.sql),
 #   SNOWFLAKE_WAREHOUSE (default COMPUTE_WH, the account's only one),
 #   DBT_THREADS,
 #   DBT_ENV_SECRET_SNOWFLAKE_KEY_PASSPHRASE (only if the key is encrypted),
