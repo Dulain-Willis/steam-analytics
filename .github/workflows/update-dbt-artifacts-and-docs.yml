@@ -23,9 +23,12 @@ jobs:
       SNOWFLAKE_DATABASE: ${{ secrets.SNOWFLAKE_DATABASE  }}
       # This job has no DBT_TARGET, so it runs as the *dev* target, whose
       # schema is now required (steam-infra #115) and prefixes every layer.
-      # A placeholder keeps the parse working; the real fix is this job's
-      # identity and target, which steam-infra #116 rewires.
-      SNOWFLAKE_SCHEMA: dbt_ci_docs
+      # So `dbt docs generate` catalogues dbt_docs_* schemas that nobody
+      # builds — but this job's catalog has been empty since #114 renamed
+      # STEAM_PROJECT out of existence under it anyway. Both halves are fixed
+      # together when steam-infra #116 gives it prod's target and the CI
+      # identity; this value only keeps the parse honest until then.
+      SNOWFLAKE_SCHEMA: dbt_docs
 
     steps:
       - name: Checkout steam-analytics onto the runner

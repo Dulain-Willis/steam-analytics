@@ -32,8 +32,9 @@ Worked example:
 Snowflake uppercases unquoted identifiers, so these land physically as `STG`,
 `DBT_DULAIN_STG`, etc.
 
-The prefix is **required** on a prefixing target: the macro raises a compiler
-error naming `SNOWFLAKE_SCHEMA` when `target.schema` is empty, rather than
+The prefix is **required** on a prefixing target — neither `SNOWFLAKE_SCHEMA`
+nor `DBT_CI_SCHEMA` has a default: the macro raises a compiler error naming
+them when `target.schema` is empty, rather than
 writing the bare layer names into whatever database the target points at.
 `env_var()` already raises when the variable is unset, but not when it is set
 to the empty string, so the check lives in the macro where the final value is

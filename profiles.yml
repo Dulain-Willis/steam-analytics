@@ -25,7 +25,8 @@
 #   SNOWFLAKE_ACCOUNT, SNOWFLAKE_USER, SNOWFLAKE_DATABASE, SNOWFLAKE_ROLE
 #   dev:    SNOWFLAKE_PRIVATE_KEY_PATH (file), SNOWFLAKE_SCHEMA (your
 #           developer schema prefix — no default; see .env.example)
-#   ci:     SNOWFLAKE_PRIVATE_KEY_PATH (file)
+#   ci:     SNOWFLAKE_PRIVATE_KEY_PATH (file), DBT_CI_SCHEMA (the PR's
+#           schema prefix, ci_pr_<N> — also no default)
 #   prod:   SNOWFLAKE_PRIVATE_KEY (content)
 #
 # SNOWFLAKE_ROLE has no default on purpose. It used to fall back to
@@ -56,8 +57,7 @@
 #   SNOWFLAKE_SCHEMA (prod only -- see above),
 #   SNOWFLAKE_WAREHOUSE (default COMPUTE_WH, the account's only one),
 #   DBT_THREADS,
-#   DBT_ENV_SECRET_SNOWFLAKE_KEY_PASSPHRASE (only if the key is encrypted),
-#   DBT_CI_SCHEMA (ci target's per-PR scratch schema)
+#   DBT_ENV_SECRET_SNOWFLAKE_KEY_PASSPHRASE (only if the key is encrypted)
 
 steam_analytics:
   target: "{{ env_var('DBT_TARGET', 'dev') }}"
@@ -87,7 +87,9 @@ steam_analytics:
       role: "{{ env_var('SNOWFLAKE_ROLE') }}"
       warehouse: "{{ env_var('SNOWFLAKE_WAREHOUSE', 'COMPUTE_WH') }}"
       database: "{{ env_var('SNOWFLAKE_DATABASE') }}"
-      schema: "{{ env_var('DBT_CI_SCHEMA', 'ci') }}"
+      # The PR's schema prefix, ci_pr_<N> — required for the same reason the
+      # dev target's is: `ci` as a default is a schema every PR shares.
+      schema: "{{ env_var('DBT_CI_SCHEMA') }}"
       private_key_path: "{{ env_var('SNOWFLAKE_PRIVATE_KEY_PATH') }}"
       private_key_passphrase: "{{ env_var('DBT_ENV_SECRET_SNOWFLAKE_KEY_PASSPHRASE', '') }}"
       threads: "{{ env_var('DBT_THREADS', '4') | int }}"

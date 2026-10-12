@@ -142,6 +142,25 @@ check "an unset developer schema fails the parse" \
 check "the unset-schema error names SNOWFLAKE_SCHEMA" \
   "$(grep -q SNOWFLAKE_SCHEMA <<<"$out" && echo 0 || echo 1)" "$out"
 
+# --- 5. ci prefixes too, and its prefix is required as well ----------------
+#
+# The ci target's schemas are steam-infra #116's, but it shares this macro and
+# lost its own `ci` default here, so both halves are asserted now.
+
+out=$(parse ci SNOWFLAKE_DATABASE=STEAM_DEV DBT_CI_SCHEMA=ci_pr_42)
+check "ci target parses" "$?" "$out"
+ci=$(relations "$WORK/ci/manifest.json")
+stray=$(grep -v '^STEAM_DEV\.ci_pr_42' <<<"$ci")
+check "ci builds only into STEAM_DEV.ci_pr_42_*" \
+  "$([[ -z "$stray" ]] && echo 0 || echo 1)" "$stray"
+
+out=$(parse ci SNOWFLAKE_DATABASE=STEAM_DEV)
+status=$?
+check "an unset CI schema fails the parse" \
+  "$([[ $status -ne 0 ]] && echo 0 || echo 1)" "$out"
+check "the unset-CI-schema error names DBT_CI_SCHEMA" \
+  "$(grep -q DBT_CI_SCHEMA <<<"$out" && echo 0 || echo 1)" "$out"
+
 if ((failures)); then
   printf '\n%d check(s) failed\n' "$failures" >&2
   exit 1
