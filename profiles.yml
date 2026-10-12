@@ -22,11 +22,22 @@
 #                 -- content is simpler here, no volume mount needed.
 #
 # Required env vars (all targets):
-#   SNOWFLAKE_ACCOUNT, SNOWFLAKE_USER, SNOWFLAKE_DATABASE
+#   SNOWFLAKE_ACCOUNT, SNOWFLAKE_USER, SNOWFLAKE_DATABASE, SNOWFLAKE_ROLE
 #   dev/ci: SNOWFLAKE_PRIVATE_KEY_PATH (file)
 #   prod:   SNOWFLAKE_PRIVATE_KEY (content)
+#
+# SNOWFLAKE_ROLE has no default on purpose. It used to fall back to
+# TRANSFORMER / TRANSFORMING, neither of which exists in the account, so an
+# unset variable produced an obscure "role does not exist" at connect time
+# instead of saying which variable was missing. The real names are
+# TRANSFORMER_PROD for prod (steam-infra's k8s/airflow/values.yaml sets it)
+# and, from steam-infra #115/#116, DEVELOPER for dev and CI for ci.
+# SNOWFLAKE_DATABASE is the database this target *builds into*; sources read
+# the raw database, which models/staging/steam/_steam__sources.yml names.
+#
 # Optional:
-#   SNOWFLAKE_ROLE, SNOWFLAKE_WAREHOUSE, DBT_THREADS,
+#   SNOWFLAKE_WAREHOUSE (default COMPUTE_WH, the account's only one),
+#   DBT_THREADS,
 #   DBT_ENV_SECRET_SNOWFLAKE_KEY_PASSPHRASE (only if the key is encrypted),
 #   DBT_CI_SCHEMA (ci target's per-PR scratch schema)
 
@@ -38,8 +49,8 @@ steam_analytics:
       type: snowflake
       account: "{{ env_var('SNOWFLAKE_ACCOUNT') }}"
       user: "{{ env_var('SNOWFLAKE_USER') }}"
-      role: "{{ env_var('SNOWFLAKE_ROLE', 'TRANSFORMER') }}"
-      warehouse: "{{ env_var('SNOWFLAKE_WAREHOUSE', 'TRANSFORMING') }}"
+      role: "{{ env_var('SNOWFLAKE_ROLE') }}"
+      warehouse: "{{ env_var('SNOWFLAKE_WAREHOUSE', 'COMPUTE_WH') }}"
       database: "{{ env_var('SNOWFLAKE_DATABASE') }}"
       # Fallback schema only — real schemas come from
       # macros/generate_schema_name.sql (folder-derived).
@@ -52,8 +63,8 @@ steam_analytics:
       type: snowflake
       account: "{{ env_var('SNOWFLAKE_ACCOUNT') }}"
       user: "{{ env_var('SNOWFLAKE_USER') }}"
-      role: "{{ env_var('SNOWFLAKE_ROLE', 'TRANSFORMER') }}"
-      warehouse: "{{ env_var('SNOWFLAKE_WAREHOUSE', 'TRANSFORMING') }}"
+      role: "{{ env_var('SNOWFLAKE_ROLE') }}"
+      warehouse: "{{ env_var('SNOWFLAKE_WAREHOUSE', 'COMPUTE_WH') }}"
       database: "{{ env_var('SNOWFLAKE_DATABASE') }}"
       schema: "{{ env_var('DBT_CI_SCHEMA', 'ci') }}"
       private_key_path: "{{ env_var('SNOWFLAKE_PRIVATE_KEY_PATH') }}"
@@ -64,8 +75,8 @@ steam_analytics:
       type: snowflake
       account: "{{ env_var('SNOWFLAKE_ACCOUNT') }}"
       user: "{{ env_var('SNOWFLAKE_USER') }}"
-      role: "{{ env_var('SNOWFLAKE_ROLE', 'TRANSFORMER') }}"
-      warehouse: "{{ env_var('SNOWFLAKE_WAREHOUSE', 'TRANSFORMING') }}"
+      role: "{{ env_var('SNOWFLAKE_ROLE') }}"
+      warehouse: "{{ env_var('SNOWFLAKE_WAREHOUSE', 'COMPUTE_WH') }}"
       database: "{{ env_var('SNOWFLAKE_DATABASE') }}"
       schema: "{{ env_var('SNOWFLAKE_SCHEMA', 'prod') }}"
       private_key: "{{ env_var('SNOWFLAKE_PRIVATE_KEY') }}"

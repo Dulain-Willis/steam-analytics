@@ -2,8 +2,10 @@ name: 'steam_analytics'
 version: '1.0.0'
 config-version: 2
 
-# The database is set per-target in profiles.yml (from the SNOWFLAKE_DATABASE
-# env var). Schemas are derived from folder structure by the
+# The database models are built into is set per-target in profiles.yml (from
+# the SNOWFLAKE_DATABASE env var) — STEAM_PROD in prod. Sources are read from
+# the raw database instead, which models/staging/steam/_steam__sources.yml
+# names itself. Schemas are derived from folder structure by the
 # generate_schema_name macro in macros/.
 profile: 'steam_analytics'
 
