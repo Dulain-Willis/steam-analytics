@@ -16,11 +16,17 @@
     marts_core, marts_product, marts_marketing, marts_finance, elementary).
     Anything without one — the fx_rates seed — lands in target.schema itself.
 
-    `staging` is listed as a bare-name target before it exists: steam-infra
-    #119 adds it to profiles.yml, and this macro is already correct when it
-    does. Any target that is not prod or staging prefixes, so a new
-    environment is sandboxed by default rather than by remembering to add it
-    here.
+    Any target that is not prod or staging prefixes, so a new environment is
+    sandboxed by default rather than by remembering to add it here. That is
+    also why this branch needed no change when steam-infra #119 added the
+    `staging` target — it was written for both targets up front, and
+    scripts/schema_naming_test.sh asserts the two produce identical layer
+    schemas in their own databases.
+
+    The same pair of target names appears in dbt_project.yml's `on-run-end`,
+    which is what runs elementary in the deployed environments and nowhere
+    else. A third deployed environment has to be added to both, or elementary
+    silently stops running there.
 
     The prefix is required, not defaulted: a target that prefixes with nothing
     would write the bare layer names into whatever database it points at,
