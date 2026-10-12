@@ -18,7 +18,8 @@ a synonym is listed as *avoid*, do not drift to it.
   [ADR 0001](docs/adr/0001-cdc-landing-shape.md)). Holds one typed column per
   source column, the **CDC bookkeeping columns**, and a `RECORD_METADATA`
   VARIANT. *Avoid* "raw table" / "RECORD_CONTENT" — the envelope is flattened
-  before it lands.
+  before it lands. Landing tables live in the **raw database** (`STEAM_RAW`);
+  "raw" names the database, never the table shape.
 - **CDC bookkeeping column** — a `__`-prefixed column added by the connector:
   `__op`, `__source_ts_ms`, `__source_lsn`, `__source_snapshot`,
   `__source_table`, `__source_txid`, `__deleted`. Together with `RECORD_METADATA`,
@@ -34,9 +35,10 @@ a synonym is listed as *avoid*, do not drift to it.
 
 ### Layers
 
-- **staging** — one model per landing table (`stg_steam__<entity>`). Casts,
+- **stg layer** — one model per landing table (`stg_steam__<entity>`). Casts,
   renames, offset-dedupes, drops CDC bookkeeping columns. No joins, no business
-  logic. Materialized as `view`. Schema: `stg`.
+  logic. Materialized as `view`. Schema: `stg`. *Avoid* calling this layer
+  "staging" — **staging** is the environment (see Environments below).
 - **intermediate** — reusable business logic that is not itself a mart
   (`int_<verb>_<noun>`): sessionization, SCD2 replay prep, event unnesting,
   FX join helpers. Materialized as `view`. Schema: `int`.
@@ -53,6 +55,22 @@ a synonym is listed as *avoid*, do not drift to it.
   `fct_source_freshness`, `fct_row_counts`, `fct_pipeline_runs`), fed by the
   `elementary` package. Lives in `marts/core`, owned by Central Data Eng — not
   a spoke.
+
+### Environments
+
+Environments (**dev**, **staging**, **prod**) are defined in `steam-infra`'s
+CONTEXT.md. The dbt-side terms:
+
+- **raw database** — `STEAM_RAW`. Where landing tables arrive. Read by every
+  environment, written only by the CDC connector.
+- **developer schema** — a layer schema prefixed with the developer's name
+  inside `STEAM_DEV` (`dbt_dulain_stg`, `dbt_dulain_marts_core`). Each
+  developer's builds are isolated from every other developer's.
+- **CI schema** — a layer schema prefixed with the PR number inside
+  `STEAM_DEV` (`ci_pr_123_stg`). Created by a PR's CI build, dropped when that
+  build finishes.
+- Staging and prod use the bare layer schema names (`stg`, `marts_core`) in
+  their own databases (`STEAM_STAGING`, `STEAM_PROD`).
 
 ### Keys & naming
 
