@@ -23,7 +23,10 @@
 #
 # Required env vars (all targets):
 #   SNOWFLAKE_ACCOUNT, SNOWFLAKE_USER, SNOWFLAKE_DATABASE, SNOWFLAKE_ROLE
-#   dev/ci: SNOWFLAKE_PRIVATE_KEY_PATH (file)
+#   dev:    SNOWFLAKE_PRIVATE_KEY_PATH (file), SNOWFLAKE_SCHEMA (your
+#           developer schema prefix — no default; see .env.example)
+#   ci:     SNOWFLAKE_PRIVATE_KEY_PATH (file), DBT_CI_SCHEMA (the PR's
+#           schema prefix, ci_pr_<N> — also no default)
 #   prod:   SNOWFLAKE_PRIVATE_KEY (content)
 #
 # SNOWFLAKE_ROLE has no default on purpose. It used to fall back to
@@ -45,13 +48,16 @@
 # SNOWFLAKE_SOURCE_SCHEMA (defaults STEAM_RAW / STEAM_RDS) -- see
 # models/staging/steam/_steam__sources.yml.
 #
+# On prefixing targets (anything but prod and staging) the schema is not a
+# fallback: macros/generate_schema_name.sql prefixes every layer with it, so
+# dev writes <SNOWFLAKE_SCHEMA>_stg and ci writes <DBT_CI_SCHEMA>_stg. On prod
+# it really is just the fallback for models with no +schema config.
+#
 # Optional:
-#   SNOWFLAKE_SCHEMA (dev and prod only -- a fallback for models with no
-#     +schema config; real schemas come from macros/generate_schema_name.sql),
+#   SNOWFLAKE_SCHEMA (prod only -- see above),
 #   SNOWFLAKE_WAREHOUSE (default COMPUTE_WH, the account's only one),
 #   DBT_THREADS,
-#   DBT_ENV_SECRET_SNOWFLAKE_KEY_PASSPHRASE (only if the key is encrypted),
-#   DBT_CI_SCHEMA (ci target's per-PR scratch schema)
+#   DBT_ENV_SECRET_SNOWFLAKE_KEY_PASSPHRASE (only if the key is encrypted)
 
 steam_analytics:
   target: "{{ env_var('DBT_TARGET', 'dev') }}"
@@ -64,9 +70,12 @@ steam_analytics:
       role: "{{ env_var('SNOWFLAKE_ROLE') }}"
       warehouse: "{{ env_var('SNOWFLAKE_WAREHOUSE', 'COMPUTE_WH') }}"
       database: "{{ env_var('SNOWFLAKE_DATABASE') }}"
-      # Fallback schema only — real schemas come from
-      # macros/generate_schema_name.sql (folder-derived).
-      schema: "{{ env_var('SNOWFLAKE_SCHEMA', 'dbt_dev') }}"
+      # Your developer schema prefix, e.g. dbt_dulain. Required, with no
+      # shared default: every schema this target writes is
+      # <SNOWFLAKE_SCHEMA>_<layer> (macros/generate_schema_name.sql), so a
+      # default would be a schema two developers share. env_var raises when it
+      # is unset; the macro raises when it is set but empty.
+      schema: "{{ env_var('SNOWFLAKE_SCHEMA') }}"
       private_key_path: "{{ env_var('SNOWFLAKE_PRIVATE_KEY_PATH') }}"
       private_key_passphrase: "{{ env_var('DBT_ENV_SECRET_SNOWFLAKE_KEY_PASSPHRASE', '') }}"
       threads: "{{ env_var('DBT_THREADS', '4') | int }}"
@@ -78,7 +87,9 @@ steam_analytics:
       role: "{{ env_var('SNOWFLAKE_ROLE') }}"
       warehouse: "{{ env_var('SNOWFLAKE_WAREHOUSE', 'COMPUTE_WH') }}"
       database: "{{ env_var('SNOWFLAKE_DATABASE') }}"
-      schema: "{{ env_var('DBT_CI_SCHEMA', 'ci') }}"
+      # The PR's schema prefix, ci_pr_<N> — required for the same reason the
+      # dev target's is: `ci` as a default is a schema every PR shares.
+      schema: "{{ env_var('DBT_CI_SCHEMA') }}"
       private_key_path: "{{ env_var('SNOWFLAKE_PRIVATE_KEY_PATH') }}"
       private_key_passphrase: "{{ env_var('DBT_ENV_SECRET_SNOWFLAKE_KEY_PASSPHRASE', '') }}"
       threads: "{{ env_var('DBT_THREADS', '4') | int }}"

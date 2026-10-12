@@ -21,6 +21,14 @@ jobs:
       # string, not as unset, so profiles.yml's default would never apply.
       SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE || 'COMPUTE_WH' }}
       SNOWFLAKE_DATABASE: ${{ secrets.SNOWFLAKE_DATABASE  }}
+      # This job has no DBT_TARGET, so it runs as the *dev* target, whose
+      # schema is now required (steam-infra #115) and prefixes every layer.
+      # So `dbt docs generate` catalogues dbt_docs_* schemas that nobody
+      # builds — but this job's catalog has been empty since #114 renamed
+      # STEAM_PROJECT out of existence under it anyway. Both halves are fixed
+      # together when steam-infra #116 gives it prod's target and the CI
+      # identity; this value only keeps the parse honest until then.
+      SNOWFLAKE_SCHEMA: dbt_docs
 
     steps:
       - name: Checkout steam-analytics onto the runner
@@ -66,6 +74,12 @@ jobs:
       SNOWFLAKE_DATABASE: dummy
       SNOWFLAKE_ROLE: dummy
       SNOWFLAKE_PRIVATE_KEY_PATH: dummy
+      # Also the dev target (no DBT_TARGET), so also needs a schema now.
+      # Every relation in the manifest this job publishes is therefore
+      # dummy.dummy_<layer>.*, which is what slim CI defers to — see
+      # steam-infra #116, which gives this job prod's target and database so
+      # deferral resolves to real STEAM_PROD relations.
+      SNOWFLAKE_SCHEMA: dummy
 
     steps:
       - name: Checkout steam-analytics onto the runner

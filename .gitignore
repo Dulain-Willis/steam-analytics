@@ -9,9 +9,9 @@ logs/
 *.pem
 .secrets/
 
-# env
+# env — .env is per machine and holds your account and key path; .envrc is
+# committed (it is one line, `dotenv`, and nothing in it is personal).
 .env
-.envrc
 
 # python
 .venv/
