@@ -18,15 +18,32 @@
 #    --project-dir/--profiles-dir, so the environment under test is exactly the
 #    variables set here and nothing else.
 #  - env_var() raises on an *unset* variable but not on an empty one, so both
-#    are tested (scenarios 5 and 6).
+#    are tested, for both prefixing targets — see check_parse_fails, which also
+#    asserts *which* variable the error names rather than only that there was
+#    one.
 set -uo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-# The repo's convention (CLAUDE.md) is `uv run dbt`; override with
-# DBT="path/to/dbt" to use a dbt that is already on the path.
+# The repo's convention (CLAUDE.md) is `uv run dbt`, which does not resolve in
+# a plain clone or a git worktree — so prefer the checkout's own .venv when it
+# has one, and let DBT="path/to/dbt" override either.
+if [[ -z "${DBT:-}" && -x "$PROJECT_DIR/.venv/bin/dbt" ]]; then
+  DBT="$PROJECT_DIR/.venv/bin/dbt"
+fi
 read -ra DBT_CMD <<<"${DBT:-uv run dbt}"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
+
+# Before any assertion: the dbt under test actually runs. Half the scenarios
+# below assert that a parse *fails*, so a dbt that cannot run at all satisfies
+# them for the wrong reason — and "the documented invocation does not resolve"
+# is exactly how that happens. Fail here, with the fix, rather than reporting
+# a screenful of green.
+if ! "${DBT_CMD[@]}" --version >/dev/null 2>&1; then
+  printf 'FAIL  "%s" does not run. Set DBT to a working dbt, e.g.\n' "${DBT_CMD[*]}" >&2
+  printf '      DBT="%s/.venv/bin/dbt" %s\n' "$PROJECT_DIR" "${BASH_SOURCE[0]}" >&2
+  exit 1
+fi
 
 failures=0
 check() {
@@ -57,6 +74,46 @@ parse() {
       --target-path "$WORK/$target" 2>&1
   )
 }
+
+# check_parse_fails NAME VAR MARKER TARGET [VAR=VALUE...] — the parse must
+# fail, the error must name VAR, and it must be MARKER's error and not some
+# other one.
+#
+# One check rather than three, because the halves are not separable. "It exited
+# non-zero" on its own is satisfied by a broken dbt, a missing package or a
+# syntax error in any model — a test asserting "this fails" passing because an
+# earlier step broke. And the variable's name on its own does not distinguish
+# the two ways a prefix can be absent, which are handled in two different
+# places:
+#
+#   unset  -> profiles.yml's env_var() raises    "Env var required but not provided"
+#   empty  -> generate_schema_name's guard raises "Compilation Error in macro
+#                                                  generate_schema_name"
+#
+# env_var() does not raise on an empty string, which is the whole reason the
+# macro carries a guard at all (#115). Asserting only the variable name lets
+# the empty scenario pass on env_var's error, i.e. with that guard untested —
+# so each call site names the error it expects.
+check_parse_fails() {
+  local name="$1" var="$2" marker="$3" out status
+  shift 3
+  out=$(parse "$@")
+  status=$?
+  if ((status == 0)); then
+    check "$name" 1 "the parse succeeded — it must fail"
+  elif ! grep -qF "$marker" <<<"$out"; then
+    check "$name" 1 "the parse failed, but not with \"$marker\":
+$out"
+  else
+    check "$name" "$(grep -qF "$var" <<<"$out" && echo 0 || echo 1)" \
+      "the parse failed with the right error, but it does not name $var:
+$out"
+  fi
+}
+
+# The two ways a required prefix can be absent, and which code rejects each.
+ENV_VAR_ERROR="Env var required but not provided"
+MACRO_GUARD_ERROR="Compilation Error in macro generate_schema_name"
 
 # relations [MANIFEST] — every built node's "DATABASE.SCHEMA", sorted unique.
 # Models and seeds only: those are what a build writes. Sources are asserted
@@ -152,22 +209,14 @@ check "staging and prod build the same layer schemas" \
 
 # --- 4. the dev schema is required, not defaulted --------------------------
 
-out=$(parse dev SNOWFLAKE_DATABASE=STEAM_DEV SNOWFLAKE_SCHEMA=)
-status=$?
-check "an empty developer schema fails the parse" \
-  "$([[ $status -ne 0 ]] && echo 0 || echo 1)" "$out"
-check "the empty-schema error names SNOWFLAKE_SCHEMA" \
-  "$(grep -q SNOWFLAKE_SCHEMA <<<"$out" && echo 0 || echo 1)" "$out"
+check_parse_fails "an empty developer schema hits the macro guard, naming SNOWFLAKE_SCHEMA" \
+  SNOWFLAKE_SCHEMA "$MACRO_GUARD_ERROR" dev SNOWFLAKE_DATABASE=STEAM_DEV SNOWFLAKE_SCHEMA=
 
 # No SNOWFLAKE_SCHEMA= at all. `env` only adds variables, and parse() runs
 # from a scratch cwd, so this really is unset — a `.env` in the checkout would
 # otherwise make this scenario lie.
-out=$(parse dev SNOWFLAKE_DATABASE=STEAM_DEV)
-status=$?
-check "an unset developer schema fails the parse" \
-  "$([[ $status -ne 0 ]] && echo 0 || echo 1)" "$out"
-check "the unset-schema error names SNOWFLAKE_SCHEMA" \
-  "$(grep -q SNOWFLAKE_SCHEMA <<<"$out" && echo 0 || echo 1)" "$out"
+check_parse_fails "an unset developer schema is rejected by env_var, naming SNOWFLAKE_SCHEMA" \
+  SNOWFLAKE_SCHEMA "$ENV_VAR_ERROR" dev SNOWFLAKE_DATABASE=STEAM_DEV
 
 # --- 5. ci: a PR's build lands only in its own CI schemas ------------------
 #
@@ -235,19 +284,11 @@ check "two PRs share no schema" \
 
 # --- 7. the ci prefix is required, not defaulted ---------------------------
 
-out=$(parse ci SNOWFLAKE_DATABASE=STEAM_DEV)
-status=$?
-check "an unset CI schema fails the parse" \
-  "$([[ $status -ne 0 ]] && echo 0 || echo 1)" "$out"
-check "the unset-CI-schema error names DBT_CI_SCHEMA" \
-  "$(grep -q DBT_CI_SCHEMA <<<"$out" && echo 0 || echo 1)" "$out"
+check_parse_fails "an unset CI schema is rejected by env_var, naming DBT_CI_SCHEMA" \
+  DBT_CI_SCHEMA "$ENV_VAR_ERROR" ci SNOWFLAKE_DATABASE=STEAM_DEV
 
-out=$(parse ci SNOWFLAKE_DATABASE=STEAM_DEV DBT_CI_SCHEMA=)
-status=$?
-check "an empty CI schema fails the parse" \
-  "$([[ $status -ne 0 ]] && echo 0 || echo 1)" "$out"
-check "the empty-CI-schema error names DBT_CI_SCHEMA" \
-  "$(grep -q DBT_CI_SCHEMA <<<"$out" && echo 0 || echo 1)" "$out"
+check_parse_fails "an empty CI schema hits the macro guard, naming DBT_CI_SCHEMA" \
+  DBT_CI_SCHEMA "$MACRO_GUARD_ERROR" ci SNOWFLAKE_DATABASE=STEAM_DEV DBT_CI_SCHEMA=
 
 # --- 8. slim-CI deferral: what the published manifest names -----------------
 #
@@ -289,6 +330,18 @@ done
 stale=$(grep -rnE 'secrets\.SNOWFLAKE_(ROLE|DATABASE|WAREHOUSE)' "$WORKFLOWS" || true)
 check "no workflow reads the role, database or warehouse from a secret" \
   "$([[ -z "$stale" ]] && echo 0 || echo 1)" "$stale"
+
+# --- 9. the committed example cannot hand two developers one schema ---------
+#
+# SNOWFLAKE_SCHEMA lost its default so that a developer who has not set one
+# fails instead of writing somewhere shared. A *placeholder* in .env.example
+# puts the default straight back: two people who copied the file and did not
+# reach that line would both build into the placeholder's schemas, silently —
+# the exact collision the guard exists for, reintroduced by documentation.
+example_schema=$(grep -E '^SNOWFLAKE_SCHEMA=' "$PROJECT_DIR/.env.example" || true)
+check ".env.example ships SNOWFLAKE_SCHEMA empty, not a working placeholder" \
+  "$([[ "$example_schema" == "SNOWFLAKE_SCHEMA=" ]] && echo 0 || echo 1)" \
+  "found: ${example_schema:-no SNOWFLAKE_SCHEMA line at all}"
 
 if ((failures)); then
   printf '\n%d check(s) failed\n' "$failures" >&2
