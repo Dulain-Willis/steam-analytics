@@ -48,10 +48,13 @@
 #
 # Caveat: that only fails loudly when the variable is genuinely *unset*.
 # env_var raises on unset, not on empty, and a GitHub Actions secret that
-# does not exist arrives as the empty string -- so in the workflows a missing
-# SNOWFLAKE_ROLE secret still yields a session with no role rather than a
-# named error. The workflows' Snowflake identities are rewired in
-# steam-infra #116; fixing it properly belongs there.
+# does not exist arrives as the empty string -- so a missing secret yields a
+# session with no role rather than a named error. steam-infra #116 took the
+# role and the database out of GitHub secrets entirely for that reason: all
+# three workflows now set SNOWFLAKE_ROLE and SNOWFLAKE_DATABASE as literals,
+# so the only secrets left are the account, the CI service user's name and its
+# private key -- values that genuinely rotate, and whose absence fails at
+# authentication with a message rather than silently.
 #
 # SNOWFLAKE_DATABASE is the database this target *builds into*. Sources read
 # the raw database instead, from their own SNOWFLAKE_RAW_DATABASE and

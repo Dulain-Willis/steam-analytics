@@ -8,15 +8,47 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      DBT_TARGET: prod
+      # NOT the prod target, despite freshness being a statement about the data
+      # prod reads — and this is the one non-obvious decision in the file.
+      #
+      # `dbt source freshness` is FreshnessTask(RunTask) and does not override
+      # after_run, so RunTask.after_run fires the End hooks: dbt_project.yml's
+      # `on-run-end` is gated on target.name in ('prod','staging'), so on the
+      # prod target this job would run elementary.on_run_end(), which *writes*
+      # STEAM_PROD.elementary. The queries are read-only; the hook is not.
+      #
+      # CI is read-only on STEAM_PROD by design — "the CI identity is denied
+      # writes to STEAM_STAGING, STEAM_PROD and STEAM_RAW" is an acceptance
+      # criterion of steam-infra #116 — so on the prod target every dispatch
+      # would pass its freshness checks and then fail in the hook. The two ways
+      # to make it pass are both worse than this: granting CI write on prod
+      # breaks that AC, and putting prod's *writer* key in GitHub secrets is
+      # exactly the exposure #116 removed.
+      #
+      # So this job runs on a non-deployed target. Freshness itself is
+      # unaffected: the sources name their own database and schema
+      # (models/staging/steam/_steam__sources.yml → STEAM_RAW.STEAM_RDS), so
+      # the target changes nothing about what is read. What it does change is
+      # that elementary no longer captures these results, which means
+      # marts/core/fct_source_freshness.sql gets no new rows from this
+      # workflow — see the note in README.md. Capturing them needs a prod
+      # writer, which means it belongs in prod Airflow's DAG, where the key
+      # never leaves the cluster. Handed to steam-infra #121.
+      DBT_TARGET: ci
+      # The CI identity (steam-infra #116): prod's and staging's service keys
+      # never leave tofu state and the Kubernetes Secrets, so the only
+      # Snowflake key in GitHub is CI's.
       SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
       SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
-      SNOWFLAKE_ROLE: ${{ secrets.SNOWFLAKE_ROLE }}
-      # `|| 'COMPUTE_WH'` because an absent secret arrives as the empty
-      # string, not as unset, so profiles.yml's default would never apply.
-      SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE || 'COMPUTE_WH' }}
-      SNOWFLAKE_DATABASE: ${{ secrets.SNOWFLAKE_DATABASE }}
-      SNOWFLAKE_PRIVATE_KEY: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
+      # Literals, for the reason given in ci.yml's dbt-run job: fixed names, a
+      # stale secret is invisible and a wrong literal is not.
+      SNOWFLAKE_ROLE: CI
+      SNOWFLAKE_DATABASE: STEAM_DEV
+      # The ci target's prefix is required (no default), and nothing here
+      # builds, so this schema is never created — it only has to be non-empty
+      # for the parse. Named for the workflow rather than a PR so a stray
+      # schema by this name would be traceable.
+      DBT_CI_SCHEMA: ci_source_freshness
 
     steps:
       - name: Checkout steam-analytics onto the runner
@@ -33,6 +65,17 @@ jobs:
 
       - name: Install dbt packages
         run: dbt deps
+
+      # The ci target takes the key as a path, not as content (that is the prod
+      # and staging shape), so it has to land on disk first — same step as
+      # ci.yml's dbt-run job.
+      - name: Write private Snowflake key to runner disk
+        env:
+          SNOWFLAKE_PRIVATE_KEY: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
+        run: |
+          printf '%s' "$SNOWFLAKE_PRIVATE_KEY" > "$RUNNER_TEMP/snowflake_private_key.p8"
+          chmod 600 "$RUNNER_TEMP/snowflake_private_key.p8"
+          echo "SNOWFLAKE_PRIVATE_KEY_PATH=$RUNNER_TEMP/snowflake_private_key.p8" >> "$GITHUB_ENV"
 
       - name: Run dbt source freshness
         run: dbt source freshness

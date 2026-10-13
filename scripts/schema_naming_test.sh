@@ -18,15 +18,34 @@
 #    --project-dir/--profiles-dir, so the environment under test is exactly the
 #    variables set here and nothing else.
 #  - env_var() raises on an *unset* variable but not on an empty one, so both
-#    are tested (scenarios 5 and 6).
+#    are tested, for both prefixing targets — see check_parse_fails, which also
+#    asserts *which* variable the error names rather than only that there was
+#    one.
 set -uo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-# The repo's convention (CLAUDE.md) is `uv run dbt`; override with
-# DBT="path/to/dbt" to use a dbt that is already on the path.
+# The repo's convention (CLAUDE.md) is `uv run dbt`, which does not resolve in
+# a plain clone or a git worktree — so prefer the checkout's own .venv when it
+# has one, and let DBT="path/to/dbt" override either.
+if [[ -z "${DBT:-}" && -x "$PROJECT_DIR/.venv/bin/dbt" ]]; then
+  DBT="$PROJECT_DIR/.venv/bin/dbt"
+fi
 read -ra DBT_CMD <<<"${DBT:-uv run dbt}"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
+
+# Before any assertion: the dbt under test actually runs. Half the scenarios
+# below assert that a parse *fails*, so a dbt that cannot run at all satisfies
+# them for the wrong reason — and "the documented invocation does not resolve"
+# is exactly how that happens. Fail here, with the fix, rather than reporting
+# a screenful of green.
+# Probed from $WORK, not from here: `uv run` resolves against the cwd, so a
+# probe run from the repo root can pass while every parse below fails.
+if ! (cd "$WORK" && "${DBT_CMD[@]}" --version >/dev/null 2>&1); then
+  printf 'FAIL  "%s" does not run. Set DBT to a working dbt, e.g.\n' "${DBT_CMD[*]}" >&2
+  printf '      DBT="%s/.venv/bin/dbt" %s\n' "$PROJECT_DIR" "${BASH_SOURCE[0]}" >&2
+  exit 1
+fi
 
 failures=0
 check() {
@@ -44,6 +63,11 @@ check() {
 parse() {
   local target="$1"
   shift
+  # The target path is keyed on the target name, and several targets are parsed
+  # more than once with different environments. Clearing it first means a
+  # failed re-parse leaves no manifest at all, so the assertions that follow
+  # fail loudly instead of passing off the previous run's.
+  rm -rf "${WORK:?}/${target:?}"
   (
     cd "$WORK" || exit 1
     env DBT_TARGET="$target" \
@@ -57,6 +81,46 @@ parse() {
       --target-path "$WORK/$target" 2>&1
   )
 }
+
+# check_parse_fails NAME VAR MARKER TARGET [VAR=VALUE...] — the parse must
+# fail, the error must name VAR, and it must be MARKER's error and not some
+# other one.
+#
+# One check rather than three, because the halves are not separable. "It exited
+# non-zero" on its own is satisfied by a broken dbt, a missing package or a
+# syntax error in any model — a test asserting "this fails" passing because an
+# earlier step broke. And the variable's name on its own does not distinguish
+# the two ways a prefix can be absent, which are handled in two different
+# places:
+#
+#   unset  -> profiles.yml's env_var() raises    "Env var required but not provided"
+#   empty  -> generate_schema_name's guard raises "Compilation Error in macro
+#                                                  generate_schema_name"
+#
+# env_var() does not raise on an empty string, which is the whole reason the
+# macro carries a guard at all (#115). Asserting only the variable name lets
+# the empty scenario pass on env_var's error, i.e. with that guard untested —
+# so each call site names the error it expects.
+check_parse_fails() {
+  local name="$1" var="$2" marker="$3" out status
+  shift 3
+  out=$(parse "$@")
+  status=$?
+  if ((status == 0)); then
+    check "$name" 1 "the parse succeeded — it must fail"
+  elif ! grep -qF "$marker" <<<"$out"; then
+    check "$name" 1 "the parse failed, but not with \"$marker\":
+$out"
+  else
+    check "$name" "$(grep -qF "$var" <<<"$out" && echo 0 || echo 1)" \
+      "the parse failed with the right error, but it does not name $var:
+$out"
+  fi
+}
+
+# The two ways a required prefix can be absent, and which code rejects each.
+ENV_VAR_ERROR="Env var required but not provided"
+MACRO_GUARD_ERROR="Compilation Error in macro generate_schema_name"
 
 # relations [MANIFEST] — every built node's "DATABASE.SCHEMA", sorted unique.
 # Models and seeds only: those are what a build writes. Sources are asserted
@@ -152,27 +216,22 @@ check "staging and prod build the same layer schemas" \
 
 # --- 4. the dev schema is required, not defaulted --------------------------
 
-out=$(parse dev SNOWFLAKE_DATABASE=STEAM_DEV SNOWFLAKE_SCHEMA=)
-status=$?
-check "an empty developer schema fails the parse" \
-  "$([[ $status -ne 0 ]] && echo 0 || echo 1)" "$out"
-check "the empty-schema error names SNOWFLAKE_SCHEMA" \
-  "$(grep -q SNOWFLAKE_SCHEMA <<<"$out" && echo 0 || echo 1)" "$out"
+check_parse_fails "an empty developer schema hits the macro guard, naming SNOWFLAKE_SCHEMA" \
+  SNOWFLAKE_SCHEMA "$MACRO_GUARD_ERROR" dev SNOWFLAKE_DATABASE=STEAM_DEV SNOWFLAKE_SCHEMA=
 
 # No SNOWFLAKE_SCHEMA= at all. `env` only adds variables, and parse() runs
 # from a scratch cwd, so this really is unset — a `.env` in the checkout would
 # otherwise make this scenario lie.
-out=$(parse dev SNOWFLAKE_DATABASE=STEAM_DEV)
-status=$?
-check "an unset developer schema fails the parse" \
-  "$([[ $status -ne 0 ]] && echo 0 || echo 1)" "$out"
-check "the unset-schema error names SNOWFLAKE_SCHEMA" \
-  "$(grep -q SNOWFLAKE_SCHEMA <<<"$out" && echo 0 || echo 1)" "$out"
+check_parse_fails "an unset developer schema is rejected by env_var, naming SNOWFLAKE_SCHEMA" \
+  SNOWFLAKE_SCHEMA "$ENV_VAR_ERROR" dev SNOWFLAKE_DATABASE=STEAM_DEV
 
-# --- 5. ci prefixes too, and its prefix is required as well ----------------
+# --- 5. ci: a PR's build lands only in its own CI schemas ------------------
 #
-# The ci target's schemas are steam-infra #116's, but it shares this macro and
-# lost its own `ci` default here, so both halves are asserted now.
+# steam-infra #116's first AC — "the CI build writes only ci_pr_<N>_* schemas
+# in STEAM_DEV, and no non-CI schema is modified" — read off the manifest. The
+# live half of that AC (a real PR, a real warehouse) is the orchestrator's
+# gate; this is the half that can be proven without one, and it is the half
+# that regresses when someone edits the macro.
 
 out=$(parse ci SNOWFLAKE_DATABASE=STEAM_DEV DBT_CI_SCHEMA=ci_pr_42)
 check "ci target parses" "$?" "$out"
@@ -181,12 +240,129 @@ stray=$(grep -v '^STEAM_DEV\.ci_pr_42' <<<"$ci")
 check "ci builds only into STEAM_DEV.ci_pr_42_*" \
   "$([[ -z "$stray" ]] && echo 0 || echo 1)" "$stray"
 
-out=$(parse ci SNOWFLAKE_DATABASE=STEAM_DEV)
-status=$?
-check "an unset CI schema fails the parse" \
-  "$([[ $status -ne 0 ]] && echo 0 || echo 1)" "$out"
-check "the unset-CI-schema error names DBT_CI_SCHEMA" \
-  "$(grep -q DBT_CI_SCHEMA <<<"$out" && echo 0 || echo 1)" "$out"
+leaks=$(grep -E '^(STEAM_STAGING|STEAM_PROD|STEAM_RAW)\.' <<<"$ci")
+check "ci writes nothing in STEAM_STAGING, STEAM_PROD or STEAM_RAW" \
+  "$([[ -z "$leaks" ]] && echo 0 || echo 1)" "$leaks"
+
+srcs=$(jq -r '[.sources[] | .database] | unique | .[]' "$WORK/ci/manifest.json")
+check "ci reads sources from STEAM_RAW" \
+  "$([[ "$srcs" == "STEAM_RAW" ]] && echo 0 || echo 1)" "$srcs"
+
+# The same layers as prod, in STEAM_DEV behind a prefix — #112 story 8, and
+# what makes a CI build a faithful rehearsal rather than a different shape.
+# The bare `ci_pr_42` (the seed) strips to an empty line and is dropped, the
+# same way section 3 drops prod's bare `prod`.
+pr42=${ci//STEAM_DEV./}
+ci_layers=${pr42//ci_pr_42_/}
+ci_layers=$(grep -v '^$' <<<"${ci_layers//ci_pr_42/}" | sort)
+check "ci builds the same layer schemas as prod" \
+  "$([[ "$ci_layers" == "$prod_layers" ]] && echo 0 || echo 1)" \
+  "$(diff <(echo "$ci_layers") <(echo "$prod_layers"))"
+
+# --- 6. every CI schema is one macros/drop_ci_schema.sql will drop ----------
+#
+# The second AC — "no ci_pr_<N>_* schema remains afterwards" — is really two
+# claims, and only one of them is about the drop. The other is this one: every
+# schema the build creates is named so that the macro's filter matches it.
+# The macro drops exactly `<prefix>` and `<prefix>_*`, so a layer that landed
+# anywhere else would survive, and nothing in the macro could notice.
+#
+# This is the check that would have caught the bug as it actually shipped: the
+# old macro dropped target.schema alone, which is one of the nine schemas
+# below.
+unmatched=$(grep -vE '^ci_pr_42(_|$)' <<<"$pr42")
+check "every ci schema is ci_pr_42 or ci_pr_42_*, so the drop macro matches it" \
+  "$([[ -z "$unmatched" ]] && echo 0 || echo 1)" "$unmatched"
+
+# And the trap the macro's comment is about: one PR's prefix must not match
+# another's schemas. `ci_pr_4` is a prefix of `ci_pr_42` as a *string*, so a
+# `like 'ci_pr_4%'` drop would take PR 42's schemas with it. Requiring the
+# separator — `ci_pr_4` itself, or `ci_pr_4_` — is what makes the two disjoint.
+out=$(parse ci SNOWFLAKE_DATABASE=STEAM_DEV DBT_CI_SCHEMA=ci_pr_4)
+check "a second PR's ci target parses" "$?" "$out"
+pr4=$(relations "$WORK/ci/manifest.json")
+pr4=${pr4//STEAM_DEV./}
+collisions=$(grep -xE 'ci_pr_4(_.*)?' <<<"$pr42")
+check "PR 4's drop pattern matches none of PR 42's schemas" \
+  "$([[ -z "$collisions" ]] && echo 0 || echo 1)" "$collisions"
+shared=$(comm -12 <(sort <<<"$pr4") <(sort <<<"$pr42"))
+check "two PRs share no schema" \
+  "$([[ -z "$shared" ]] && echo 0 || echo 1)" "$shared"
+
+# --- 7. the ci prefix is required, not defaulted ---------------------------
+
+check_parse_fails "an unset CI schema is rejected by env_var, naming DBT_CI_SCHEMA" \
+  DBT_CI_SCHEMA "$ENV_VAR_ERROR" ci SNOWFLAKE_DATABASE=STEAM_DEV
+
+check_parse_fails "an empty CI schema hits the macro guard, naming DBT_CI_SCHEMA" \
+  DBT_CI_SCHEMA "$MACRO_GUARD_ERROR" ci SNOWFLAKE_DATABASE=STEAM_DEV DBT_CI_SCHEMA=
+
+# --- 8. slim-CI deferral: what the published manifest names -----------------
+#
+# `dbt build --defer --state state` rewrites an unselected ref() to the
+# relation recorded in the manifest that update-dbt-artifacts publishes. Now
+# that the ci target prefixes, deferral genuinely fires — unselected upstream
+# models are not in the current target — so that manifest's relations are the
+# ones CI actually reads, and they have to be prod's (#112's Q1: they used to
+# be `dummy.*`, which nobody noticed because deferral never fired).
+#
+# dbt parse makes no connection, so the fix is two env values and they are
+# checkable here: parse with exactly what that job sets and assert the result.
+
+out=$(parse prod SNOWFLAKE_DATABASE=STEAM_PROD)
+check "the manifest job's target and database parse" "$?" "$out"
+deferred=$(relations "$WORK/prod/manifest.json")
+stray=$(grep -v '^STEAM_PROD\.' <<<"$deferred")
+check "the published manifest's relations are all in STEAM_PROD" \
+  "$([[ -z "$stray" ]] && echo 0 || echo 1)" "$stray"
+
+# The values above are a copy of the workflow's, so they are only a proof
+# while they still match it. Two greps rather than a YAML parse: the workflow
+# asserts the same property on the real artifact at run time (its "Assert the
+# manifest's relations are prod's" step), and this is just the tripwire for
+# editing the env block without noticing what it is for.
+WORKFLOWS="$PROJECT_DIR/.github/workflows"
+MANIFEST_WF="$WORKFLOWS/update-dbt-artifacts-and-docs.yml"
+# Sliced to the update-dbt-artifacts job before grepping. serve-dbt-docs in
+# the same file sets both of these too, at the same indent, so a whole-file
+# grep passes off *its* copies — deleting both lines from the manifest job
+# would still print ok, i.e. the check could not fail for the reason it names.
+manifest_job=$(awk '/^  update-dbt-artifacts:/{f=1} f&&/^  [a-z]/&&!/^  update-dbt-artifacts:/{exit} f' "$MANIFEST_WF")
+for pair in "DBT_TARGET: prod" "SNOWFLAKE_DATABASE: STEAM_PROD"; do
+  check "update-dbt-artifacts-and-docs.yml's manifest job sets $pair" \
+    "$(grep -qF "      $pair" <<<"$manifest_job" && echo 0 || echo 1)" \
+    "the update-dbt-artifacts job block:
+$manifest_job"
+done
+
+# And the other half of that job's contract, which is a *negative*: it must set
+# no SNOWFLAKE_SCHEMA, because the prod target defaults it to `prod` and that
+# is what prod Airflow builds. Setting it here moves the fx_rates seed's
+# relation in the published manifest.
+check "update-dbt-artifacts-and-docs.yml's manifest job sets no SNOWFLAKE_SCHEMA" \
+  "$(grep -qE '^ +SNOWFLAKE_SCHEMA:' <<<"$manifest_job" && echo 1 || echo 0)" \
+  "$(grep -nE '^ +SNOWFLAKE_SCHEMA:' <<<"$manifest_job")"
+
+# And the identity half (#116): role and database are literals in every
+# workflow, never secrets. A secret that goes stale is invisible — #114
+# renamed STEAM_PROJECT and the SNOWFLAKE_DATABASE secret went on naming it,
+# which is what broke ci.yml's dbt-run job — while a wrong literal is in the
+# diff. Only the account, the CI service user and its key are secrets now.
+stale=$(grep -rnE 'secrets\.SNOWFLAKE_(ROLE|DATABASE|WAREHOUSE)' "$WORKFLOWS" || true)
+check "no workflow reads the role, database or warehouse from a secret" \
+  "$([[ -z "$stale" ]] && echo 0 || echo 1)" "$stale"
+
+# --- 9. the committed example cannot hand two developers one schema ---------
+#
+# SNOWFLAKE_SCHEMA lost its default so that a developer who has not set one
+# fails instead of writing somewhere shared. A *placeholder* in .env.example
+# puts the default straight back: two people who copied the file and did not
+# reach that line would both build into the placeholder's schemas, silently —
+# the exact collision the guard exists for, reintroduced by documentation.
+example_schema=$(grep -E '^SNOWFLAKE_SCHEMA=' "$PROJECT_DIR/.env.example" || true)
+check ".env.example ships SNOWFLAKE_SCHEMA empty, not a working placeholder" \
+  "$([[ "$example_schema" == "SNOWFLAKE_SCHEMA=" ]] && echo 0 || echo 1)" \
+  "found: ${example_schema:-no SNOWFLAKE_SCHEMA line at all}"
 
 if ((failures)); then
   printf '\n%d check(s) failed\n' "$failures" >&2
