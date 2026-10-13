@@ -39,7 +39,9 @@ trap 'rm -rf "$WORK"' EXIT
 # them for the wrong reason — and "the documented invocation does not resolve"
 # is exactly how that happens. Fail here, with the fix, rather than reporting
 # a screenful of green.
-if ! "${DBT_CMD[@]}" --version >/dev/null 2>&1; then
+# Probed from $WORK, not from here: `uv run` resolves against the cwd, so a
+# probe run from the repo root can pass while every parse below fails.
+if ! (cd "$WORK" && "${DBT_CMD[@]}" --version >/dev/null 2>&1); then
   printf 'FAIL  "%s" does not run. Set DBT to a working dbt, e.g.\n' "${DBT_CMD[*]}" >&2
   printf '      DBT="%s/.venv/bin/dbt" %s\n' "$PROJECT_DIR" "${BASH_SOURCE[0]}" >&2
   exit 1
@@ -61,6 +63,11 @@ check() {
 parse() {
   local target="$1"
   shift
+  # The target path is keyed on the target name, and several targets are parsed
+  # more than once with different environments. Clearing it first means a
+  # failed re-parse leaves no manifest at all, so the assertions that follow
+  # fail loudly instead of passing off the previous run's.
+  rm -rf "${WORK:?}/${target:?}"
   (
     cd "$WORK" || exit 1
     env DBT_TARGET="$target" \
@@ -316,11 +323,25 @@ check "the published manifest's relations are all in STEAM_PROD" \
 # editing the env block without noticing what it is for.
 WORKFLOWS="$PROJECT_DIR/.github/workflows"
 MANIFEST_WF="$WORKFLOWS/update-dbt-artifacts-and-docs.yml"
+# Sliced to the update-dbt-artifacts job before grepping. serve-dbt-docs in
+# the same file sets both of these too, at the same indent, so a whole-file
+# grep passes off *its* copies — deleting both lines from the manifest job
+# would still print ok, i.e. the check could not fail for the reason it names.
+manifest_job=$(awk '/^  update-dbt-artifacts:/{f=1} f&&/^  [a-z]/&&!/^  update-dbt-artifacts:/{exit} f' "$MANIFEST_WF")
 for pair in "DBT_TARGET: prod" "SNOWFLAKE_DATABASE: STEAM_PROD"; do
-  check "update-dbt-artifacts-and-docs.yml sets $pair" \
-    "$(grep -qF "      $pair" "$MANIFEST_WF" && echo 0 || echo 1)" \
-    "$(grep -nE 'DBT_TARGET|SNOWFLAKE_DATABASE' "$MANIFEST_WF")"
+  check "update-dbt-artifacts-and-docs.yml's manifest job sets $pair" \
+    "$(grep -qF "      $pair" <<<"$manifest_job" && echo 0 || echo 1)" \
+    "the update-dbt-artifacts job block:
+$manifest_job"
 done
+
+# And the other half of that job's contract, which is a *negative*: it must set
+# no SNOWFLAKE_SCHEMA, because the prod target defaults it to `prod` and that
+# is what prod Airflow builds. Setting it here moves the fx_rates seed's
+# relation in the published manifest.
+check "update-dbt-artifacts-and-docs.yml's manifest job sets no SNOWFLAKE_SCHEMA" \
+  "$(grep -qE '^ +SNOWFLAKE_SCHEMA:' <<<"$manifest_job" && echo 1 || echo 0)" \
+  "$(grep -nE '^ +SNOWFLAKE_SCHEMA:' <<<"$manifest_job")"
 
 # And the identity half (#116): role and database are literals in every
 # workflow, never secrets. A secret that goes stale is invisible — #114

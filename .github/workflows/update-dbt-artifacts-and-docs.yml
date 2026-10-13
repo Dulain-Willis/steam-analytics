@@ -115,11 +115,19 @@ jobs:
       # emptied — uploads just as happily, and slim CI then fails in somebody
       # else's PR with "Object does not exist" against a database that was
       # never created. Cheap here, confusing there.
+      # The seed is checked by name as well as by database, because it is the
+      # one node whose *schema* the env above can move: it configures no
+      # +schema, so it lands in the target's own schema, which is
+      # SNOWFLAKE_SCHEMA when set and `prod` when not. Setting SNOWFLAKE_SCHEMA
+      # here would record STEAM_PROD.foo.fx_rates — right database, wrong
+      # relation — which a database-only check waves through and slim CI then
+      # fails on. Every other node takes its schema from its +schema config.
       - name: Assert the manifest's relations are prod's
         run: |
           strays=$(jq -r '
             [ (.nodes[]   | select(.database != "STEAM_PROD")),
-              (.sources[] | select(.database != "STEAM_RAW"))
+              (.sources[] | select(.database != "STEAM_RAW")),
+              (.nodes[]   | select(.resource_type == "seed" and .schema != "prod"))
             ] | map(.database + "." + .schema + "." + .name) | unique | .[]
           ' target/manifest.json)
           if [[ -n "$strays" ]]; then
@@ -127,7 +135,7 @@ jobs:
             echo "$strays"
             exit 1
           fi
-          echo "manifest builds into STEAM_PROD and reads STEAM_RAW"
+          echo "manifest builds into STEAM_PROD.<bare layer> and reads STEAM_RAW"
 
       - name: Upload latest manifest.json as artifact
         uses: actions/upload-artifact@v4

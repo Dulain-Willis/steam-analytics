@@ -87,9 +87,26 @@ a way a stale literal is not.
 | Workflow | Target | Reads / writes |
 |---|---|---|
 | `ci.yml` (`dbt-run`) | `ci` | writes `STEAM_DEV.ci_pr_<N>_*`; defers unchanged models to `STEAM_PROD` |
-| `source-freshness.yml` | `prod` | reads `STEAM_RAW` |
+| `source-freshness.yml` | `ci` | reads `STEAM_RAW`; writes nothing |
 | `update-dbt-artifacts-and-docs.yml` (`serve-dbt-docs`) | `prod` | catalogues `STEAM_PROD` |
 | `update-dbt-artifacts-and-docs.yml` (`update-dbt-artifacts`) | `prod` | nothing — `dbt parse` makes no connection |
+
+**Known gap: `fct_source_freshness` has no producer.** `source-freshness.yml`
+runs on the `ci` target rather than `prod`, which is a deliberate choice with a
+consequence. `dbt source freshness` runs `on-run-end`, and that hook is gated on
+the deployed targets — so on `prod` the workflow would call
+`elementary.on_run_end()`, which **writes** `STEAM_PROD.elementary`. The CI
+identity is read-only on `STEAM_PROD` by design, and the two ways to let it
+through are both worse: granting CI write on prod breaks the isolation this
+setup exists for, and putting prod's writer key in GitHub secrets restores the
+exposure it removed.
+
+The freshness checks themselves are unaffected (sources name their own database,
+so the target changes nothing about what is read), but elementary no longer
+captures the results, so `models/marts/core/fct_source_freshness.sql` gets no new
+rows. Capturing them needs a prod writer, which means the freshness run belongs
+in prod Airflow's DAG — where the key never leaves the cluster — rather than in
+GitHub Actions. Tracked on steam-infra #121.
 
 Slim CI (`dbt build --select state:modified+ --defer`) resolves an unselected
 `ref()` to the relation recorded in the `dbt-manifest` artifact that

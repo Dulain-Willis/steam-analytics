@@ -58,10 +58,22 @@
 
         information_schema.schemata lists only schemas the role has privileges
         on, which is exactly the right scope: CI holds USAGE on all and future
-        schemas in STEAM_DEV, so its own always appear.
+        schemas in STEAM_DEV, so its own always appear. The catalog_name filter
+        is belt and braces — the DROP below is always qualified with
+        target.database, so a row from elsewhere could not be dropped by
+        mistake — but without it the log could name schemas this did not touch.
+
+        The one cost of a SELECT over `show terse schemas`: this needs a running
+        warehouse and SHOW does not, and it runs in an `if: always()` cleanup
+        step. In practice a build that could not reach a warehouse also created
+        no schemas, so there is nothing left behind to clean; if that ever stops
+        being true, the fix is `show terse schemas in database <db>` read as
+        columns[1] — positional again, but then it is the column *order* being
+        assumed rather than the name.
     #}
     {%- set found = run_query(
-        "select schema_name from " ~ target.database ~ ".information_schema.schemata") -%}
+        "select schema_name from " ~ target.database ~ ".information_schema.schemata"
+        ~ " where catalog_name = '" ~ target.database ~ "'") -%}
 
     {%- if execute -%}
         {%- set dropped = [] -%}
