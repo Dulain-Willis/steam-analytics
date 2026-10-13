@@ -63,8 +63,8 @@ its failures. The macro this replaced dropped `target.schema` alone, i.e. one
 of the nine.
 
 The set is "`<prefix>` and anything starting `<prefix>_`", and it is found by
-listing the database's schemas and filtering the names in Jinja rather than
-with `show schemas like`. `_` is a single-character wildcard in SQL `LIKE`, so
+selecting the database's schema names from `information_schema.schemata` and
+filtering them in Jinja rather than with `show schemas like`. `_` is a single-character wildcard in SQL `LIKE`, so
 `'ci_pr_42_%'` also matches names nobody meant, and `'ci_pr_42%'` without the
 separator matches PR 420's schemas — in a statement that is a `DROP`.
 Filtering by name has no wildcard semantics to get wrong.

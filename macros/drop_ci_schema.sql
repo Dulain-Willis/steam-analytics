@@ -46,11 +46,26 @@
             ~ " Set DBT_CI_SCHEMA to the PR's prefix (e.g. DBT_CI_SCHEMA=ci_pr_42).") }}
     {%- endif -%}
 
-    {%- set found = run_query("show terse schemas in database " ~ target.database) -%}
+    {#
+        A single-column SELECT against information_schema, read positionally
+        (`columns[0]`), rather than `show schemas` read by column name. Two
+        reasons, both unverifiable without a warehouse and so not worth
+        guessing at: Snowflake's metadata commands return their own column
+        names with their own casing, and a `columns['name']` lookup that
+        guessed wrong would fail at run time inside an `if: always()` cleanup
+        step — the one place a failure is easiest to miss. One column means
+        position is unambiguous.
+
+        information_schema.schemata lists only schemas the role has privileges
+        on, which is exactly the right scope: CI holds USAGE on all and future
+        schemas in STEAM_DEV, so its own always appear.
+    #}
+    {%- set found = run_query(
+        "select schema_name from " ~ target.database ~ ".information_schema.schemata") -%}
 
     {%- if execute -%}
         {%- set dropped = [] -%}
-        {%- for name in found.columns['name'].values() -%}
+        {%- for name in found.columns[0].values() -%}
             {%- set folded = name | lower -%}
             {%- if folded == prefix or folded.startswith(prefix ~ '_') -%}
                 {%- do run_query("drop schema if exists " ~ target.database ~ "." ~ name ~ " cascade") -%}
