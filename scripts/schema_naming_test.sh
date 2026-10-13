@@ -169,10 +169,13 @@ check "an unset developer schema fails the parse" \
 check "the unset-schema error names SNOWFLAKE_SCHEMA" \
   "$(grep -q SNOWFLAKE_SCHEMA <<<"$out" && echo 0 || echo 1)" "$out"
 
-# --- 5. ci prefixes too, and its prefix is required as well ----------------
+# --- 5. ci: a PR's build lands only in its own CI schemas ------------------
 #
-# The ci target's schemas are steam-infra #116's, but it shares this macro and
-# lost its own `ci` default here, so both halves are asserted now.
+# steam-infra #116's first AC — "the CI build writes only ci_pr_<N>_* schemas
+# in STEAM_DEV, and no non-CI schema is modified" — read off the manifest. The
+# live half of that AC (a real PR, a real warehouse) is the orchestrator's
+# gate; this is the half that can be proven without one, and it is the half
+# that regresses when someone edits the macro.
 
 out=$(parse ci SNOWFLAKE_DATABASE=STEAM_DEV DBT_CI_SCHEMA=ci_pr_42)
 check "ci target parses" "$?" "$out"
@@ -181,12 +184,111 @@ stray=$(grep -v '^STEAM_DEV\.ci_pr_42' <<<"$ci")
 check "ci builds only into STEAM_DEV.ci_pr_42_*" \
   "$([[ -z "$stray" ]] && echo 0 || echo 1)" "$stray"
 
+leaks=$(grep -E '^(STEAM_STAGING|STEAM_PROD|STEAM_RAW)\.' <<<"$ci")
+check "ci writes nothing in STEAM_STAGING, STEAM_PROD or STEAM_RAW" \
+  "$([[ -z "$leaks" ]] && echo 0 || echo 1)" "$leaks"
+
+srcs=$(jq -r '[.sources[] | .database] | unique | .[]' "$WORK/ci/manifest.json")
+check "ci reads sources from STEAM_RAW" \
+  "$([[ "$srcs" == "STEAM_RAW" ]] && echo 0 || echo 1)" "$srcs"
+
+# The same layers as prod, in STEAM_DEV behind a prefix — #112 story 8, and
+# what makes a CI build a faithful rehearsal rather than a different shape.
+# The bare `ci_pr_42` (the seed) strips to an empty line and is dropped, the
+# same way section 3 drops prod's bare `prod`.
+pr42=${ci//STEAM_DEV./}
+ci_layers=${pr42//ci_pr_42_/}
+ci_layers=$(grep -v '^$' <<<"${ci_layers//ci_pr_42/}" | sort)
+check "ci builds the same layer schemas as prod" \
+  "$([[ "$ci_layers" == "$prod_layers" ]] && echo 0 || echo 1)" \
+  "$(diff <(echo "$ci_layers") <(echo "$prod_layers"))"
+
+# --- 6. every CI schema is one macros/drop_ci_schema.sql will drop ----------
+#
+# The second AC — "no ci_pr_<N>_* schema remains afterwards" — is really two
+# claims, and only one of them is about the drop. The other is this one: every
+# schema the build creates is named so that the macro's filter matches it.
+# The macro drops exactly `<prefix>` and `<prefix>_*`, so a layer that landed
+# anywhere else would survive, and nothing in the macro could notice.
+#
+# This is the check that would have caught the bug as it actually shipped: the
+# old macro dropped target.schema alone, which is one of the nine schemas
+# below.
+unmatched=$(grep -vE '^ci_pr_42(_|$)' <<<"$pr42")
+check "every ci schema is ci_pr_42 or ci_pr_42_*, so the drop macro matches it" \
+  "$([[ -z "$unmatched" ]] && echo 0 || echo 1)" "$unmatched"
+
+# And the trap the macro's comment is about: one PR's prefix must not match
+# another's schemas. `ci_pr_4` is a prefix of `ci_pr_42` as a *string*, so a
+# `like 'ci_pr_4%'` drop would take PR 42's schemas with it. Requiring the
+# separator — `ci_pr_4` itself, or `ci_pr_4_` — is what makes the two disjoint.
+out=$(parse ci SNOWFLAKE_DATABASE=STEAM_DEV DBT_CI_SCHEMA=ci_pr_4)
+check "a second PR's ci target parses" "$?" "$out"
+pr4=$(relations "$WORK/ci/manifest.json")
+pr4=${pr4//STEAM_DEV./}
+collisions=$(grep -xE 'ci_pr_4(_.*)?' <<<"$pr42")
+check "PR 4's drop pattern matches none of PR 42's schemas" \
+  "$([[ -z "$collisions" ]] && echo 0 || echo 1)" "$collisions"
+shared=$(comm -12 <(sort <<<"$pr4") <(sort <<<"$pr42"))
+check "two PRs share no schema" \
+  "$([[ -z "$shared" ]] && echo 0 || echo 1)" "$shared"
+
+# --- 7. the ci prefix is required, not defaulted ---------------------------
+
 out=$(parse ci SNOWFLAKE_DATABASE=STEAM_DEV)
 status=$?
 check "an unset CI schema fails the parse" \
   "$([[ $status -ne 0 ]] && echo 0 || echo 1)" "$out"
 check "the unset-CI-schema error names DBT_CI_SCHEMA" \
   "$(grep -q DBT_CI_SCHEMA <<<"$out" && echo 0 || echo 1)" "$out"
+
+out=$(parse ci SNOWFLAKE_DATABASE=STEAM_DEV DBT_CI_SCHEMA=)
+status=$?
+check "an empty CI schema fails the parse" \
+  "$([[ $status -ne 0 ]] && echo 0 || echo 1)" "$out"
+check "the empty-CI-schema error names DBT_CI_SCHEMA" \
+  "$(grep -q DBT_CI_SCHEMA <<<"$out" && echo 0 || echo 1)" "$out"
+
+# --- 8. slim-CI deferral: what the published manifest names -----------------
+#
+# `dbt build --defer --state state` rewrites an unselected ref() to the
+# relation recorded in the manifest that update-dbt-artifacts publishes. Now
+# that the ci target prefixes, deferral genuinely fires — unselected upstream
+# models are not in the current target — so that manifest's relations are the
+# ones CI actually reads, and they have to be prod's (#112's Q1: they used to
+# be `dummy.*`, which nobody noticed because deferral never fired).
+#
+# dbt parse makes no connection, so the fix is two env values and they are
+# checkable here: parse with exactly what that job sets and assert the result.
+
+out=$(parse prod SNOWFLAKE_DATABASE=STEAM_PROD)
+check "the manifest job's target and database parse" "$?" "$out"
+deferred=$(relations "$WORK/prod/manifest.json")
+stray=$(grep -v '^STEAM_PROD\.' <<<"$deferred")
+check "the published manifest's relations are all in STEAM_PROD" \
+  "$([[ -z "$stray" ]] && echo 0 || echo 1)" "$stray"
+
+# The values above are a copy of the workflow's, so they are only a proof
+# while they still match it. Two greps rather than a YAML parse: the workflow
+# asserts the same property on the real artifact at run time (its "Assert the
+# manifest's relations are prod's" step), and this is just the tripwire for
+# editing the env block without noticing what it is for.
+WORKFLOWS="$PROJECT_DIR/.github/workflows"
+MANIFEST_WF="$WORKFLOWS/update-dbt-artifacts-and-docs.yml"
+for pair in "DBT_TARGET: prod" "SNOWFLAKE_DATABASE: STEAM_PROD"; do
+  check "update-dbt-artifacts-and-docs.yml sets $pair" \
+    "$(grep -qF "      $pair" "$MANIFEST_WF" && echo 0 || echo 1)" \
+    "$(grep -nE 'DBT_TARGET|SNOWFLAKE_DATABASE' "$MANIFEST_WF")"
+done
+
+# And the identity half (#116): role and database are literals in every
+# workflow, never secrets. A secret that goes stale is invisible — #114
+# renamed STEAM_PROJECT and the SNOWFLAKE_DATABASE secret went on naming it,
+# which is what broke ci.yml's dbt-run job — while a wrong literal is in the
+# diff. Only the account, the CI service user and its key are secrets now.
+stale=$(grep -rnE 'secrets\.SNOWFLAKE_(ROLE|DATABASE|WAREHOUSE)' "$WORKFLOWS" || true)
+check "no workflow reads the role, database or warehouse from a secret" \
+  "$([[ -z "$stale" ]] && echo 0 || echo 1)" "$stale"
 
 if ((failures)); then
   printf '\n%d check(s) failed\n' "$failures" >&2

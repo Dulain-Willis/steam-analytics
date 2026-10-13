@@ -49,3 +49,32 @@ deployed environment means editing both.
 
 `scripts/schema_naming_test.sh` asserts all of the above through
 `dbt parse`'s manifest, with no Snowflake connection.
+
+## `drop_ci_schema`
+
+Drops every schema a PR's CI build created, in `STEAM_DEV`. Run by
+`.github/workflows/ci.yml` as its last step with `if: always()`, so the
+schemas go whether the build passed or failed.
+
+"Every schema" is the point. A `ci` build with `DBT_CI_SCHEMA=ci_pr_42` writes
+nine of them — `ci_pr_42` (the seed), `ci_pr_42_stg`, `_int`, the four
+`_marts_*`, `_elementary`, plus `ci_pr_42_dbt_test__audit` when a test stores
+its failures. The macro this replaced dropped `target.schema` alone, i.e. one
+of the nine.
+
+The set is "`<prefix>` and anything starting `<prefix>_`", and it is found by
+listing the database's schemas and filtering the names in Jinja rather than
+with `show schemas like`. `_` is a single-character wildcard in SQL `LIKE`, so
+`'ci_pr_42_%'` also matches names nobody meant, and `'ci_pr_42%'` without the
+separator matches PR 420's schemas — in a statement that is a `DROP`.
+Filtering by name has no wildcard semantics to get wrong.
+
+Two guards: the macro refuses to run on any target but `ci` (the same logic
+against `dev` would drop a developer's own schemas), and it refuses an empty
+prefix (which would match everything). Neither is reachable from the workflow;
+they exist for the hand-run case.
+
+`scripts/schema_naming_test.sh` asserts the half of this that needs no
+warehouse: that every schema a `ci` build creates is one this filter matches,
+and that two PRs whose prefixes share a string prefix (`ci_pr_4`, `ci_pr_42`)
+match disjoint sets.

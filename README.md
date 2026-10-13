@@ -65,11 +65,42 @@ convention.
 |---|---|---|---|
 | `dev` | your machine, with or without local Airflow | `STEAM_DEV` | `<SNOWFLAKE_SCHEMA>_<layer>` |
 | `ci` | a PR's build | `STEAM_DEV` | `ci_pr_<N>_<layer>` |
+| `staging` | staging Airflow on EKS | `STEAM_STAGING` | bare layer names |
 | `prod` | prod Airflow on EKS | `STEAM_PROD` | bare layer names (`stg`, `int`, `marts_*`) |
 
 Schema naming lives in `macros/generate_schema_name.sql`; see `macros/README.md`
 for the full table, and `scripts/schema_naming_test.sh` to check it without a
 Snowflake connection.
+
+### CI
+
+All three workflows run as one Snowflake identity: the service user
+`STEAM_CI_SVC` with role `CI`, created by steam-infra's `terraform/snowflake`.
+It writes `STEAM_DEV` only, reads `STEAM_RAW` and `STEAM_PROD`, and has no
+grant whatsoever on `STEAM_STAGING`. Its key pair is regenerated on every
+steam-infra bring-up, which pushes three secrets to this repo:
+`SNOWFLAKE_ACCOUNT`, `SNOWFLAKE_USER` and `SNOWFLAKE_PRIVATE_KEY`. Nothing
+else is a secret — `SNOWFLAKE_ROLE` and `SNOWFLAKE_DATABASE` are literals in
+each workflow, because they are fixed names and a stale secret is invisible in
+a way a stale literal is not.
+
+| Workflow | Target | Reads / writes |
+|---|---|---|
+| `ci.yml` (`dbt-run`) | `ci` | writes `STEAM_DEV.ci_pr_<N>_*`; defers unchanged models to `STEAM_PROD` |
+| `source-freshness.yml` | `prod` | reads `STEAM_RAW` |
+| `update-dbt-artifacts-and-docs.yml` (`serve-dbt-docs`) | `prod` | catalogues `STEAM_PROD` |
+| `update-dbt-artifacts-and-docs.yml` (`update-dbt-artifacts`) | `prod` | nothing — `dbt parse` makes no connection |
+
+Slim CI (`dbt build --select state:modified+ --defer`) resolves an unselected
+`ref()` to the relation recorded in the `dbt-manifest` artifact that
+`update-dbt-artifacts` publishes. That job parses as the **prod** target
+against **`STEAM_PROD`** for exactly that reason, and asserts it on the
+artifact before uploading it: a manifest naming any other database makes slim
+CI fail in an unrelated PR with "Object does not exist".
+
+Every schema a PR's build created is dropped by
+`dbt run-operation drop_ci_schema` on the way out, pass or fail — see
+`macros/README.md`.
 
 See `CONTEXT.md` for the domain model and `docs/` for the SQL style guide and
 the ADRs.

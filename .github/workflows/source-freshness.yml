@@ -8,15 +8,22 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
+      # prod, because freshness is a statement about the data prod reads.
+      # Nothing here writes: `dbt source freshness` only queries the landing
+      # tables in STEAM_RAW, named by models/staging/steam/_steam__sources.yml.
       DBT_TARGET: prod
+      # The CI identity, not prod's (steam-infra #116): it already reads
+      # STEAM_RAW and STEAM_PROD, so prod's and staging's service keys never
+      # have to leave tofu state and the Kubernetes Secrets — the only
+      # Snowflake key in GitHub is CI's.
       SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
       SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
-      SNOWFLAKE_ROLE: ${{ secrets.SNOWFLAKE_ROLE }}
-      # `|| 'COMPUTE_WH'` because an absent secret arrives as the empty
-      # string, not as unset, so profiles.yml's default would never apply.
-      SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE || 'COMPUTE_WH' }}
-      SNOWFLAKE_DATABASE: ${{ secrets.SNOWFLAKE_DATABASE }}
       SNOWFLAKE_PRIVATE_KEY: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
+      # Literals, for the reason given in ci.yml's dbt-run job: fixed names, a
+      # stale secret is invisible and a wrong literal is not. STEAM_PROD is
+      # only the session's default database here; the sources name their own.
+      SNOWFLAKE_ROLE: CI
+      SNOWFLAKE_DATABASE: STEAM_PROD
 
     steps:
       - name: Checkout steam-analytics onto the runner
