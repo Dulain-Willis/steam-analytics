@@ -5,8 +5,13 @@ sources:
     description: >
       steam-infra CDC landing tables — flattened, schematized Debezium
       change events (see ADR 0001). One table per steam-infra OLTP table.
-    database: "{{ env_var('SNOWFLAKE_DATABASE') }}"
-    schema: "{{ env_var('SNOWFLAKE_SOURCE_SCHEMA', 'PUBLIC') }}"
+    # The raw database, not the target's own: every environment reads the one
+    # set of landing tables and only steam-infra's Kafka sink writes them. So
+    # these are deliberately *not* SNOWFLAKE_DATABASE, which is the database
+    # this target builds into (STEAM_PROD, STEAM_DEV, ...). The defaults are
+    # the project's fixed convention, matching steam-infra's lib/env.sh.
+    database: "{{ env_var('SNOWFLAKE_RAW_DATABASE', 'STEAM_RAW') }}"
+    schema: "{{ env_var('SNOWFLAKE_SOURCE_SCHEMA', 'STEAM_RDS') }}"
     config:
       loaded_at_field: to_timestamp_ltz(__source_ts_ms, 3)
       freshness:

@@ -13,12 +13,26 @@ jobs:
       id-token: write 
     environment: github-pages
 
-    env: 
+    env:
+      # prod, so `dbt docs generate` catalogues the relations prod actually
+      # built — the bare STEAM_PROD.{stg,int,marts_*} schemas. Before
+      # steam-infra #116 this job ran with no DBT_TARGET, i.e. as the *dev*
+      # target, so it catalogued prefixed schemas nobody builds and published a
+      # docs site with an empty catalog.
+      DBT_TARGET: prod
+      # The CI identity (steam-infra #116). Its STEAM_PROD read — USAGE on the
+      # database and all/future schemas, SELECT on all/future tables *and
+      # views* — is exactly what a catalog query needs, and it is the same
+      # grant slim-CI deferral needs, so there is one identity to rotate.
       SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
       SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
-      SNOWFLAKE_ROLE: ${{ secrets.SNOWFLAKE_ROLE }}
-      SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
-      SNOWFLAKE_DATABASE: ${{ secrets.SNOWFLAKE_DATABASE  }}
+      # The prod target takes the key as *content*, not a path, so there is no
+      # "write the key to disk" step here any more (there was one, for the dev
+      # target's private_key_path).
+      SNOWFLAKE_PRIVATE_KEY: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
+      # Literals, for the reason given in ci.yml's dbt-run job.
+      SNOWFLAKE_ROLE: CI
+      SNOWFLAKE_DATABASE: STEAM_PROD
 
     steps:
       - name: Checkout steam-analytics onto the runner
@@ -33,16 +47,8 @@ jobs:
       - name: Install python packages
         run: pip install -r requirements.txt 
 
-      - name: Install dbt packages 
-        run: dbt deps 
-      
-      - name: Write private Snowflake key to runner disk
-        env:
-          SNOWFLAKE_PRIVATE_KEY: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
-        run: |
-          printf '%s' "$SNOWFLAKE_PRIVATE_KEY" > "$RUNNER_TEMP/snowflake_private_key.p8"
-          chmod 600 "$RUNNER_TEMP/snowflake_private_key.p8"
-          echo "SNOWFLAKE_PRIVATE_KEY_PATH=$RUNNER_TEMP/snowflake_private_key.p8" >> "$GITHUB_ENV"
+      - name: Install dbt packages
+        run: dbt deps
 
       - name: Generate dbt docs
         run: dbt docs generate
@@ -59,10 +65,30 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
+      # This job publishes the `dbt-manifest` artifact that ci.yml's slim build
+      # defers to, so its *relation names* are load-bearing: --defer rewrites
+      # an unselected ref() to whatever database.schema this manifest recorded.
+      # Those two values are the ones that end up there, and nothing else here
+      # is (steam-infra #112's Q1):
+      DBT_TARGET: prod
+      SNOWFLAKE_DATABASE: STEAM_PROD
+      # The rest stay dummy on purpose. `dbt parse` compiles without
+      # connecting, which is how this job has always run and passed, so no
+      # Snowflake identity, key or grant is involved — and not having one is
+      # better than having one, since a parse needs no privileges at all.
+      #
+      # These are set only because profiles.yml's env_var() calls raise on an
+      # *unset* variable. Note SNOWFLAKE_PRIVATE_KEY, not _PATH: the prod
+      # target takes the key as content. Switching DBT_TARGET without it is a
+      # parse failure that reads as a missing secret.
       SNOWFLAKE_ACCOUNT: dummy
       SNOWFLAKE_USER: dummy
-      SNOWFLAKE_DATABASE: dummy
-      SNOWFLAKE_PRIVATE_KEY_PATH: dummy
+      SNOWFLAKE_ROLE: dummy
+      SNOWFLAKE_PRIVATE_KEY: dummy
+      # No SNOWFLAKE_SCHEMA: the prod target defaults it to `prod`, and prod
+      # Airflow sets nothing either (steam-infra k8s/airflow/values-prod.yaml),
+      # so leaving it unset is what makes the fx_rates seed's relation in this
+      # manifest match the one prod actually builds.
 
     steps:
       - name: Checkout steam-analytics onto the runner
@@ -82,6 +108,34 @@ jobs:
 
       - name: Parse for latest manifest.json
         run: dbt parse
+
+      # The one assertion that matters about the artifact below: every built
+      # relation in it is in STEAM_PROD, and the sources are in STEAM_RAW. A
+      # manifest naming `dummy` — or `.`, if SNOWFLAKE_DATABASE above were ever
+      # emptied — uploads just as happily, and slim CI then fails in somebody
+      # else's PR with "Object does not exist" against a database that was
+      # never created. Cheap here, confusing there.
+      # The seed is checked by name as well as by database, because it is the
+      # one node whose *schema* the env above can move: it configures no
+      # +schema, so it lands in the target's own schema, which is
+      # SNOWFLAKE_SCHEMA when set and `prod` when not. Setting SNOWFLAKE_SCHEMA
+      # here would record STEAM_PROD.foo.fx_rates — right database, wrong
+      # relation — which a database-only check waves through and slim CI then
+      # fails on. Every other node takes its schema from its +schema config.
+      - name: Assert the manifest's relations are prod's
+        run: |
+          strays=$(jq -r '
+            [ (.nodes[]   | select(.database != "STEAM_PROD")),
+              (.sources[] | select(.database != "STEAM_RAW")),
+              (.nodes[]   | select(.resource_type == "seed" and .schema != "prod"))
+            ] | map(.database + "." + .schema + "." + .name) | unique | .[]
+          ' target/manifest.json)
+          if [[ -n "$strays" ]]; then
+            echo "::error::manifest relations are not prod's — slim CI would defer to these:"
+            echo "$strays"
+            exit 1
+          fi
+          echo "manifest builds into STEAM_PROD.<bare layer> and reads STEAM_RAW"
 
       - name: Upload latest manifest.json as artifact
         uses: actions/upload-artifact@v4

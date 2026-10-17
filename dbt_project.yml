@@ -2,8 +2,10 @@ name: 'steam_analytics'
 version: '1.0.0'
 config-version: 2
 
-# The database is set per-target in profiles.yml (from the SNOWFLAKE_DATABASE
-# env var). Schemas are derived from folder structure by the
+# The database models are built into is set per-target in profiles.yml (from
+# the SNOWFLAKE_DATABASE env var) — STEAM_PROD in prod. Sources are read from
+# the raw database instead, which models/staging/steam/_steam__sources.yml
+# names itself. Schemas are derived from folder structure by the
 # generate_schema_name macro in macros/.
 profile: 'steam_analytics'
 
@@ -33,9 +35,18 @@ clean-targets:
   - "target"
   - "dbt_packages"
 
-# Feeds fct_source_freshness / fct_dbt_test_results via elementary; prod-only so CI/dev don't pollute the shared elementary schema.
+# Feeds fct_source_freshness / fct_dbt_test_results via elementary. Runs in
+# the deployed environments only — staging and prod — so a dev or CI build
+# doesn't pollute the shared elementary schema. Staging is included so the
+# pipeline-health models are proven before they ship (steam-infra #112 story
+# 27): prod-only means the one thing nothing ever exercises before prod is the
+# hook that is supposed to tell you prod is healthy.
+#
+# This list is deliberately the same set of targets as the bare-schema branch
+# in macros/generate_schema_name.sql — the deployed environments. Add a new
+# one to both or elementary silently stops running there.
 on-run-end:
-  - "{% if target.name == 'prod' %}{{ elementary.on_run_end() }}{% endif %}"
+  - "{% if target.name in ('prod', 'staging') %}{{ elementary.on_run_end() }}{% endif %}"
 
 # Schemas are the folder-derived names below, applied verbatim in every
 # environment by macros/generate_schema_name.sql.
