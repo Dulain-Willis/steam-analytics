@@ -25,6 +25,18 @@ a synonym is listed as *avoid*, do not drift to it.
   `__source_table`, `__source_txid`, `__deleted`. Together with `RECORD_METADATA`,
   these are dropped by the `stg` layer — except `is_deleted`, which a `stg` model
   derives from `__deleted`.
+- **deletion propagation** — how a hard delete in `steam-infra` (compliance
+  erasure or retention purge, `steam-infra`'s `scenarios/deletion_execution.py`,
+  #143) reaches marts: the source connector's rewrite-mode delete handling
+  emits a real row carrying `__deleted = TRUE` and the primary key, which
+  lands in the landing table like any other change, is turned into
+  `is_deleted` by the `stg` layer (offset dedupe already picks the
+  highest-offset row per primary key, so a delete at a later offset always
+  wins over the row it deletes), and is then excluded by every mart that
+  filters `where not is_deleted` — no `DELETE` ever runs in Snowflake.
+  `fct_product_funnel_sessions` is the one mart that refs a `stg` model
+  directly rather than through `marts/core` (Acquisition section below) and
+  must apply the same filter itself rather than inheriting it.
 - **source event time** — `__source_ts_ms`, the database commit time of the
   change (epoch ms). The freshness `loaded_at_field`. *Avoid* `RECORD_METADATA`
   `CreateTime` (Kafka produce time, reset on every re-snapshot).
