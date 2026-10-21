@@ -150,3 +150,103 @@ unit_tests:
           granted_at: "2024-01-01 00:00:00"
           revoked_at: null
           recorded_at: "2024-06-01 00:00:00"
+
+  - name: test_fct_playtime_sessions_incremental_lookback_window
+    description: >
+      Same proof as test_fct_purchases_incremental_lookback_window, for
+      fct_playtime_sessions (#135): the filter guards on recorded_at
+      (arrival timestamp), not started_at/ended_at (event timestamps) -
+      every fixture row's started_at/ended_at is held fixed while
+      recorded_at moves.
+    model: fct_playtime_sessions
+    overrides:
+      macros:
+        is_incremental: true
+    given:
+      - input: ref('stg_steam__playtime_sessions')
+        rows:
+          - playtime_session_id: inside_window
+            user_id: u1
+            game_id: g1
+            started_at: "2024-01-01 00:00:00"
+            ended_at: "2024-01-01 01:00:00"
+            recorded_at: "2024-06-10 00:00:00"
+            is_deleted: false
+          - playtime_session_id: at_cutoff
+            user_id: u2
+            game_id: g2
+            started_at: "2024-01-01 00:00:00"
+            ended_at: "2024-01-01 01:00:00"
+            recorded_at: "2024-06-01 00:00:00"
+            is_deleted: false
+          - playtime_session_id: outside_window
+            user_id: u3
+            game_id: g3
+            started_at: "2024-01-01 00:00:00"
+            ended_at: "2024-01-01 01:00:00"
+            recorded_at: "2024-05-20 00:00:00"
+            is_deleted: false
+      - input: this
+        rows:
+          - recorded_at: "2024-06-15 00:00:00"
+    expect:
+      # user_key/game_key are surrogate hashes computed inside this model,
+      # not passed through from a fixture, so the comparison is scoped to
+      # the columns below - recorded_at distinguishes the two surviving
+      # rows.
+      rows:
+        - started_at: "2024-01-01 00:00:00"
+          recorded_at: "2024-06-10 00:00:00"
+          is_open: false
+          duration_minutes: 60
+        - started_at: "2024-01-01 00:00:00"
+          recorded_at: "2024-06-01 00:00:00"
+          is_open: false
+          duration_minutes: 60
+
+  - name: test_fct_concurrent_player_snapshots_incremental_lookback_window
+    description: >
+      Same proof as test_fct_purchases_incremental_lookback_window, for
+      fct_concurrent_player_snapshots (#135): the filter guards on
+      recorded_at (arrival timestamp), not snapshot_at (event timestamp) -
+      every fixture row's snapshot_at is held fixed while recorded_at
+      moves.
+    model: fct_concurrent_player_snapshots
+    overrides:
+      macros:
+        is_incremental: true
+    given:
+      - input: ref('stg_steam__concurrent_player_snapshots')
+        rows:
+          - concurrent_player_snapshot_id: inside_window
+            game_id: g1
+            player_count: 100
+            snapshot_at: "2024-01-01 00:00:00"
+            recorded_at: "2024-06-10 00:00:00"
+            is_deleted: false
+          - concurrent_player_snapshot_id: at_cutoff
+            game_id: g2
+            player_count: 200
+            snapshot_at: "2024-01-01 00:00:00"
+            recorded_at: "2024-06-01 00:00:00"
+            is_deleted: false
+          - concurrent_player_snapshot_id: outside_window
+            game_id: g3
+            player_count: 300
+            snapshot_at: "2024-01-01 00:00:00"
+            recorded_at: "2024-05-20 00:00:00"
+            is_deleted: false
+      - input: this
+        rows:
+          - recorded_at: "2024-06-15 00:00:00"
+    expect:
+      # game_key is a surrogate hash computed inside this model, not
+      # passed through from a fixture, so the comparison is scoped to the
+      # columns below - player_count distinguishes the two surviving rows.
+      rows:
+        - player_count: 100
+          snapshot_at: "2024-01-01 00:00:00"
+          recorded_at: "2024-06-10 00:00:00"
+        - player_count: 200
+          snapshot_at: "2024-01-01 00:00:00"
+          recorded_at: "2024-06-01 00:00:00"

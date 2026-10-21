@@ -367,7 +367,12 @@ models:
   - name: fct_playtime_sessions
     description: >
       One row per gameplay session. Open sessions (no ended_at) carry
-      is_open = true and a null duration_minutes.
+      is_open = true and a null duration_minutes. Incremental merge on
+      playtime_session_key, filtered on recorded_at (arrival timestamp)
+      with a lookback window (CONTEXT.md glossary). is_deleted is carried
+      through unfiltered (a merge can't delete a row that drops out of its
+      own select) — every downstream consumer filters
+      `where not is_deleted` itself.
     config:
       contract:
         enforced: true
@@ -386,6 +391,9 @@ models:
       - name: playtime_session_key
         data_type: varchar
         tests: [unique, not_null]
+      - name: is_deleted
+        data_type: boolean
+        tests: [not_null]
       - name: user_key
         data_type: varchar
         tests:
@@ -406,6 +414,8 @@ models:
         data_type: timestamp_tz
       - name: started_date
         data_type: date
+      - name: recorded_at
+        data_type: timestamp_tz
       - name: is_open
         data_type: boolean
         tests: [not_null]
@@ -413,7 +423,13 @@ models:
         data_type: number
 
   - name: fct_concurrent_player_snapshots
-    description: One row per game x concurrent-player snapshot.
+    description: >
+      One row per game x concurrent-player snapshot. Incremental merge on
+      concurrent_player_snapshot_key, filtered on recorded_at (arrival
+      timestamp) with a lookback window (CONTEXT.md glossary). is_deleted
+      is carried through unfiltered (a merge can't delete a row that drops
+      out of its own select) — every downstream consumer filters
+      `where not is_deleted` itself.
     config:
       contract:
         enforced: true
@@ -432,6 +448,9 @@ models:
       - name: concurrent_player_snapshot_key
         data_type: varchar
         tests: [unique, not_null]
+      - name: is_deleted
+        data_type: boolean
+        tests: [not_null]
       - name: game_key
         data_type: varchar
         tests:
@@ -446,6 +465,8 @@ models:
         data_type: timestamp_tz
       - name: snapshot_date
         data_type: date
+      - name: recorded_at
+        data_type: timestamp_tz
 
   - name: fct_wishlist_items
     description: >
@@ -579,13 +600,21 @@ unit_tests:
         - added_date: "2024-01-01"
           removed_at: null
 
-  - name: test_fct_playtime_sessions_excludes_deleted_rows
+  - name: test_fct_playtime_sessions_carries_is_deleted_through
     description: >
-      #143 model-boundary unit test: a playtime session carrying the CDC
-      delete flag (compliance erasure's tier-1 hard delete, propagated
-      through __deleted) must not appear in fct_playtime_sessions. Fixed
-      input rows, independent of any live drill having run.
+      #143's original "excludes deleted rows" unit test no longer holds
+      post-#135: fct_playtime_sessions is now incremental merge, which
+      can't propagate a soft delete the way a table-materialized model
+      could (a row that stops appearing in the filtered select can never
+      be reached again to flip it - see CONTEXT.md's "is_deleted on an
+      incremental fact" glossary entry). is_deleted is carried through
+      unfiltered instead; this proves it rather than proving exclusion.
+      Runs against the non-incremental branch (#135 made this model
+      incremental; this isn't exercising the lookback filter).
     model: fct_playtime_sessions
+    overrides:
+      macros:
+        is_incremental: false
     given:
       - input: ref('stg_steam__playtime_sessions')
         rows:
@@ -594,18 +623,25 @@ unit_tests:
             game_id: "g1"
             started_at: "2024-01-01T00:00:00"
             ended_at: "2024-01-01T01:00:00"
+            recorded_at: "2024-01-01T01:05:00"
             is_deleted: false
           - playtime_session_id: "22222222-2222-2222-2222-222222222222"
             user_id: "u2"
             game_id: "g2"
             started_at: "2024-06-01T00:00:00"
             ended_at: "2024-06-01T01:00:00"
+            recorded_at: "2024-06-01T01:05:00"
             is_deleted: true
     expect:
       rows:
         - started_date: "2024-01-01"
           is_open: false
           duration_minutes: 60
+          is_deleted: false
+        - started_date: "2024-06-01"
+          is_open: false
+          duration_minutes: 60
+          is_deleted: true
 
   - name: test_fct_purchases_payment_method_bucket
     description: >

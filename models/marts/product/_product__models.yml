@@ -114,7 +114,13 @@ models:
       its first-occurred timestamp plus a has_reached_<stage> boolean;
       purchase_complete is a marker only - amount / grant detail comes from
       fct_ownership_grants. Singular test in tests/ covers stage timestamps
-      being non-decreasing within a session.
+      being non-decreasing within a session. Incremental merge on
+      funnel_session_key, filtered on each contributing client_events
+      row's recorded_at (arrival timestamp) with a lookback window
+      (CONTEXT.md glossary). is_deleted is carried through unfiltered
+      (true only when every event contributing to the session is deleted)
+      — a merge can't delete a row that drops out of its own select —
+      every downstream consumer filters `where not is_deleted` itself.
     config:
       contract:
         enforced: true
@@ -122,6 +128,9 @@ models:
       - name: session_id
         data_type: varchar
         tests: [unique, not_null]
+      - name: is_deleted
+        data_type: boolean
+        tests: [not_null]
       - name: user_id
         data_type: varchar
         tests:
@@ -139,6 +148,8 @@ models:
       - name: session_started_at
         data_type: timestamp_tz
         tests: [not_null]
+      - name: recorded_at
+        data_type: timestamp_tz
       - name: store_page_view_at
         data_type: timestamp_tz
       - name: game_page_view_at
@@ -161,13 +172,24 @@ models:
         data_type: boolean
 
 unit_tests:
-  - name: test_fct_product_funnel_sessions_excludes_deleted_rows
+  - name: test_fct_product_funnel_sessions_carries_is_deleted_through
     description: >
-      #143 model-boundary unit test: a client_event carrying the CDC
-      delete flag must not contribute to fct_product_funnel_sessions --
-      here, a session whose only event is deleted must not appear at
-      all. Fixed input rows, independent of any live drill having run.
+      #143's original "excludes deleted rows" unit test no longer holds
+      post-#135: fct_product_funnel_sessions is now incremental merge,
+      which can't propagate a soft delete the way a table-materialized
+      model could (a session whose only surviving event fell outside a
+      later run's lookback window would simply drop out of the select,
+      and the merge can never reach its already-materialized row again to
+      flip it - see CONTEXT.md's "is_deleted on an incremental fact"
+      glossary entry). is_deleted is carried through unfiltered instead,
+      true only when every event contributing to the session is deleted
+      (booland_agg) - this proves that rather than proving exclusion.
+      Runs against the non-incremental branch (#135 made this model
+      incremental; this isn't exercising the lookback filter).
     model: fct_product_funnel_sessions
+    overrides:
+      macros:
+        is_incremental: false
     given:
       - input: ref('stg_steam__client_events')
         rows:
@@ -177,6 +199,7 @@ unit_tests:
             game_id: "g1"
             event_name: "store_page_view"
             occurred_at: "2024-01-01T00:00:00"
+            recorded_at: "2024-01-01T00:05:00"
             is_deleted: false
           - event_id: "22222222-2222-2222-2222-222222222222"
             session_id: "s2"
@@ -184,9 +207,70 @@ unit_tests:
             game_id: "g2"
             event_name: "store_page_view"
             occurred_at: "2024-06-01T00:00:00"
+            recorded_at: "2024-06-01T00:05:00"
             is_deleted: true
     expect:
       rows:
         - session_id: "s1"
           has_reached_store_page_view: true
           has_reached_game_page_view: false
+          is_deleted: false
+        - session_id: "s2"
+          has_reached_store_page_view: true
+          has_reached_game_page_view: false
+          is_deleted: true
+
+  - name: test_fct_product_funnel_sessions_incremental_lookback_window
+    description: >
+      Same proof as fct_purchases'/fct_ownership_grants'
+      incremental-lookback-window unit tests (steam-analytics
+      _core__unit_tests.yml), for fct_product_funnel_sessions (#135): the
+      filter guards each client_events row on its own recorded_at
+      (arrival timestamp), not occurred_at (event timestamp) - every
+      fixture row's occurred_at is held fixed while recorded_at moves.
+      One event per session here, so the filter's effect on the
+      aggregation is the same as on a flat 1:1 row.
+    model: fct_product_funnel_sessions
+    overrides:
+      macros:
+        is_incremental: true
+    given:
+      - input: ref('stg_steam__client_events')
+        rows:
+          - event_id: inside_window
+            session_id: s_inside
+            user_id: u1
+            game_id: g1
+            event_name: store_page_view
+            occurred_at: "2024-01-01 00:00:00"
+            recorded_at: "2024-06-10 00:00:00"
+            is_deleted: false
+          - event_id: at_cutoff
+            session_id: s_cutoff
+            user_id: u2
+            game_id: g2
+            event_name: store_page_view
+            occurred_at: "2024-01-01 00:00:00"
+            recorded_at: "2024-06-01 00:00:00"
+            is_deleted: false
+          - event_id: outside_window
+            session_id: s_outside
+            user_id: u3
+            game_id: g3
+            event_name: store_page_view
+            occurred_at: "2024-01-01 00:00:00"
+            recorded_at: "2024-05-20 00:00:00"
+            is_deleted: false
+      - input: this
+        rows:
+          - recorded_at: "2024-06-15 00:00:00"
+    expect:
+      rows:
+        - session_id: s_inside
+          recorded_at: "2024-06-10 00:00:00"
+          has_reached_store_page_view: true
+          is_deleted: false
+        - session_id: s_cutoff
+          recorded_at: "2024-06-01 00:00:00"
+          has_reached_store_page_view: true
+          is_deleted: false

@@ -21,6 +21,8 @@ playtime_sessions as (
 
     from {{ ref('fct_playtime_sessions') }}
 
+    where not is_deleted
+
 ),
 
 first_active_dates_per_game as (
