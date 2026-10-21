@@ -37,6 +37,13 @@
 -- live events would count a deleted event as a reached funnel stage.
 -- Every downstream consumer filters `where not is_deleted` itself.
 --
+-- client_events.user_id can be orphaned (steam-infra #140 dropped the FK):
+-- a left join to dim_users, not inner, is what keeps an orphan session from
+-- silently vanishing (steam-infra #141). resolved_user_id falls back to the
+-- unknown-member sentinel when no dim_users row matches; raw user_id is
+-- kept alongside it so the relationships test below can still report
+-- orphan volume.
+--
 -- on_schema_change='fail' (#144): a contract-enforced incremental model
 -- can't use the default 'ignore' - dbt requires 'append_new_columns' or
 -- 'fail' here. 'fail' matches the contract's own intent: the columns:
@@ -75,13 +82,39 @@ client_events as (
 
 ),
 
+users as (
+
+    select user_id
+
+    from {{ ref('dim_users') }}
+
+),
+
+client_events_resolved as (
+
+    select
+        client_events.session_id,
+        client_events.user_id,
+        coalesce(users.user_id, '{{ unknown_member() }}') as resolved_user_id,
+        client_events.event_name,
+        client_events.occurred_at,
+        client_events.recorded_at,
+        client_events.is_deleted
+
+    from client_events
+
+    left join users
+        on client_events.user_id = users.user_id
+
+),
+
 {% if is_incremental() %}
 
     touched_sessions as (
 
         select distinct session_id
 
-        from client_events
+        from client_events_resolved
 
         where {{ incremental_lookback_filter() }}
 
@@ -89,12 +122,12 @@ client_events as (
 
     client_events_for_touched_sessions as (
 
-        select client_events.*
+        select client_events_resolved.*
 
-        from client_events
+        from client_events_resolved
 
-        inner join touched_sessions
-            on client_events.session_id = touched_sessions.session_id
+        inner join
+            touched_sessions on client_events_resolved.session_id = touched_sessions.session_id
 
     ),
 
@@ -105,6 +138,7 @@ session_stage_timestamps as (
     select
         session_id,
         user_id,
+        resolved_user_id,
         max(recorded_at) as recorded_at,
         booland_agg(is_deleted) as is_deleted,
         min(occurred_at) as session_started_at,
@@ -156,13 +190,14 @@ session_stage_timestamps as (
 
     from
         {{
-        'client_events_for_touched_sessions'
-        if is_incremental()
-        else 'client_events'
-    }}
+            'client_events_for_touched_sessions'
+            if is_incremental()
+            else 'client_events_resolved'
+        }}
 
     group by 1,
-        2
+        2,
+        3
 
 ),
 
@@ -171,6 +206,7 @@ final as (
     select
         session_id,
         user_id,
+        resolved_user_id,
         {{ dbt_utils.generate_surrogate_key(['session_id']) }} as funnel_session_key,
         date(session_started_at) as session_date,
         session_started_at,

@@ -2,7 +2,12 @@ version: 2
 
 models:
   - name: dim_users
-    description: One row per user. Type 1, latest attributes only.
+    description: >
+      One row per user. Type 1, latest attributes only. Plus exactly one
+      sentinel row (user_id = 'unknown_member', is_unknown_member = true)
+      that an orphan client_events.user_id resolves to (steam-infra #141) -
+      distinct from the campaign_id null-means-organic convention below, no
+      fake campaign row is introduced for that case.
     config:
       contract:
         enforced: true
@@ -33,6 +38,9 @@ models:
         data_type: date
       - name: tenure_days
         data_type: number
+      - name: is_unknown_member
+        data_type: boolean
+        tests: [not_null]
 
   - name: dim_marketing_campaigns
     description: One row per marketing campaign. Type 1, latest attributes only.
