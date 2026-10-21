@@ -64,9 +64,54 @@ a synonym is listed as *avoid*, do not drift to it.
   and has no `marts/core` conformed source to build on. Schemas:
   `marts_product`, `marts_marketing`, `marts_finance`.
 - **Pipeline Health** — facts about the pipeline itself (`fct_dbt_test_results`,
-  `fct_source_freshness`, `fct_row_counts`, `fct_pipeline_runs`), fed by the
-  `elementary` package. Lives in `marts/core`, owned by Central Data Eng — not
-  a spoke.
+  `fct_source_freshness`, `fct_row_counts`), fed by the `elementary` package.
+  Lives in `marts/core`, owned by Central Data Eng — not a spoke.
+  `fct_pipeline_runs` was named here but was never built; removed (steam-infra
+  #145). Elementary's volume/freshness anomaly-detection tests (#145) need no
+  fourth model of their own — they run as ordinary dbt generic tests, so
+  their results land in `dbt_run_results`/`dbt_tests` exactly like any other
+  test and are already picked up by `fct_dbt_test_results`'s existing
+  pass/fail aggregation.
+- **Anomaly detection vs. source freshness** — `fct_source_freshness` is dbt's
+  native source-freshness check: a fixed `warn_after`/`error_after` threshold
+  against event-time lag (`__source_ts_ms`) on the raw landing tables only.
+  Elementary's `freshness_anomalies`/`volume_anomalies` tests (#145) are a
+  different mechanism at a different layer: a statistical comparison against
+  each model's own history (row count or newest-row recency), applied to
+  `stg` models using arrival time (`recorded_at`) and to `marts/core` facts
+  using their event-time column — neither of which dbt's source freshness
+  check can reach, since it only runs against declared `source()`s. The two
+  are complementary: one catches "this source is older than its contract
+  allows," the other catches "this model's volume or recency looks unlike
+  itself," even while still inside the contract.
+
+### Which of the seven fault classes anomaly detection actually catches
+
+steam-infra #129's problem statement names seven fault classes. This ticket
+(#145) wires `elementary.volume_anomalies`/`freshness_anomalies` across the
+`stg` layer and the `marts/core` facts (see `_steam__models.yml`,
+`_core__models.yml`). The honest mapping, worked through mechanism by
+mechanism rather than assumed:
+
+| Fault class | Mechanism | Caught by #145's anomaly tests? | Actual detector |
+|---|---|---|---|
+| Backdated updates (continuous) | restates an old row, written now | **Yes** — `volume_anomalies`: the restatement is an extra CDC row landing "now," so it bumps the `recorded_at` bucket's row count even though the row's own event-time is old. | `volume_anomalies` is the sole automated detector; spec says no new handling mechanism is needed beyond `merge` + lookback. |
+| Business-key duplicates (continuous, purchases) | second row, same business key, distinct PK | **Yes** — `volume_anomalies` on both `stg_steam__purchases` (`recorded_at`) and `fct_purchases` (`purchased_at`); the duplicate lands in the same bucket as its twin either way. | `volume_anomalies` is a real backstop here — it would have caught this even if the purpose-written `dbt_utils.unique_combination_of_columns` test (#133) had never been written. |
+| Late arrival (continuous, client_events/playtime_sessions) | row written now, event-time backdated up to 7d | **No.** It substitutes for an on-time row rather than adding one, so table-wide row count is unaffected, and `recorded_at`'s max is always "now" regardless. Freshness-by-event-time is also unaffected, since on-time rows keep the max fresh. | #137's purpose-built arrival-lag monitor (compares `occurred_at`/`started_at` against `recorded_at` against the configured lookback window) — a bespoke Pipeline Health model, not a generic anomaly test. |
+| Unknown enum value onset (payment_method) | new value in an existing column | **No.** Same row count, same timing — only a value changes. Neither row-count nor recency anomaly detection can see a value distribution shift. | Purpose-written warn-severity `accepted_values` test (#139). No anomaly-detection fallback exists for this class. |
+| Orphan references (client_events.user_id, FK dropped) | child rows with no matching parent | **No**, as configured — table-wide event volume is unaffected by orphan rate (the same number of child rows arrive either way). Spec names a narrower variant ("anomaly detection on orphan volume") scoped to the unknown-member join via `where_expression`, but that needs the unknown-member row #140/#141 add, which doesn't exist yet. | Purpose-written warn-severity `relationships` test (#141) today; a `where_expression`-scoped `volume_anomalies` on the unknown-member count is a natural follow-on once #140/#141 land. |
+| Compliance erasure (one-shot scenario) | hard-delete / anonymize / retain, per-user | **No**, not at realistic drill scale — one user's rows are noise against daily volume/freshness. | Purpose-written singular tests (#143): no erased user's behavioral rows persist; retained transaction rows survive erasure. |
+| Schema evolution (one-shot scenario, additive column) | new nullable column on `games` | **No** — not a volume or freshness signal at all; it's a column-shape change. | dbt contract enforcement (#144) failing the build on a breaking change — a structural mechanism, not an anomaly test or a hand-written assertion. |
+
+So, of the seven: **two** (backdated updates, business-key duplicates) are
+genuinely caught by this ticket's anomaly tests with no other mechanism
+required; the other **five** each need their own purpose-written test or
+bespoke monitor, because the fault changes something anomaly detection
+(as configured here — row counts and recency, no finer-grained
+`where_expression` slicing) cannot see. `freshness_anomalies` as
+configured does not map cleanly onto any of the seven classes either — its
+practical value is as a general pipeline-health safety net (e.g. a stalled
+upstream) that sits alongside, not on top of, the seven-class taxonomy.
 
 ### Schema evolution & contracts
 

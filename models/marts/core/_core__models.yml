@@ -162,6 +162,21 @@ models:
     config:
       contract:
         enforced: true
+    # Volume/freshness anomaly detection on purchased_at: this mart has no
+    # recorded_at of its own, so these watch business-event volume/recency
+    # directly - a layer dbt's native source freshness cannot reach, since
+    # it only runs against declared source()s (see CONTEXT.md).
+    tests:
+      - elementary.volume_anomalies:
+          arguments:
+            timestamp_column: purchased_at
+          config:
+            severity: warn
+      - elementary.freshness_anomalies:
+          arguments:
+            timestamp_column: purchased_at
+          config:
+            severity: warn
     columns:
       - name: purchase_key
         data_type: varchar
@@ -202,6 +217,17 @@ models:
     config:
       contract:
         enforced: true
+    tests:
+      - elementary.volume_anomalies:
+          arguments:
+            timestamp_column: refunded_at
+          config:
+            severity: warn
+      - elementary.freshness_anomalies:
+          arguments:
+            timestamp_column: refunded_at
+          config:
+            severity: warn
     columns:
       - name: refund_key
         data_type: varchar
@@ -246,6 +272,17 @@ models:
     config:
       contract:
         enforced: true
+    tests:
+      - elementary.volume_anomalies:
+          arguments:
+            timestamp_column: granted_at
+          config:
+            severity: warn
+      - elementary.freshness_anomalies:
+          arguments:
+            timestamp_column: granted_at
+          config:
+            severity: warn
     columns:
       - name: ownership_grant_key
         data_type: varchar
@@ -284,6 +321,17 @@ models:
     config:
       contract:
         enforced: true
+    tests:
+      - elementary.volume_anomalies:
+          arguments:
+            timestamp_column: started_at
+          config:
+            severity: warn
+      - elementary.freshness_anomalies:
+          arguments:
+            timestamp_column: started_at
+          config:
+            severity: warn
     columns:
       - name: playtime_session_key
         data_type: varchar
@@ -319,6 +367,17 @@ models:
     config:
       contract:
         enforced: true
+    tests:
+      - elementary.volume_anomalies:
+          arguments:
+            timestamp_column: snapshot_at
+          config:
+            severity: warn
+      - elementary.freshness_anomalies:
+          arguments:
+            timestamp_column: snapshot_at
+          config:
+            severity: warn
     columns:
       - name: concurrent_player_snapshot_key
         data_type: varchar
@@ -345,6 +404,17 @@ models:
     config:
       contract:
         enforced: true
+    tests:
+      - elementary.volume_anomalies:
+          arguments:
+            timestamp_column: added_at
+          config:
+            severity: warn
+      - elementary.freshness_anomalies:
+          arguments:
+            timestamp_column: added_at
+          config:
+            severity: warn
     columns:
       - name: wishlist_item_key
         data_type: varchar
