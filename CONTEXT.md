@@ -28,10 +28,22 @@ a synonym is listed as *avoid*, do not drift to it.
 - **source event time** — `__source_ts_ms`, the database commit time of the
   change (epoch ms). The freshness `loaded_at_field`. *Avoid* `RECORD_METADATA`
   `CreateTime` (Kafka produce time, reset on every re-snapshot).
-- **offset dedupe** — `steam-infra` runs `snapshot.mode=always` with no persisted
-  offsets, so every connector restart re-emits every row as an `op='r'` event.
-  Each `stg` model keeps the row with the highest `RECORD_METADATA:offset` per
-  primary key (one partition per topic → offset is a total order).
+- **offset dedupe** — `steam-infra` runs `snapshot.mode=initial`
+  (`steam-infra`'s `docs/debezium-postgres-config.md`), not `always`: a
+  connector restart within a live session resumes from its stored Kafka
+  Connect offset instead of re-snapshotting. The real reason `stg` dedupes
+  isn't restarts — a CDC topic carries one message per change over a row's
+  whole life (every insert/update/delete), and the landing table is
+  append-only, so collapsing each primary key down to its highest
+  `RECORD_METADATA:offset` (one partition per topic → offset is a total
+  order) is how `stg` gets current state at all, with or without a restart.
+  `initial` mode does still take a full re-snapshot at the *start* of every
+  session (Kafka itself, including its offset topic, is torn down between
+  sessions — nothing to resume from), so the dedupe also absorbs that
+  session-boundary re-snapshot; within a session it's cheap insurance against
+  a forced re-snapshot (e.g. connector CR delete/recreate) rather than a
+  load-bearing need. Confirmed against the live connector in `steam-infra`
+  #132.
 
 ### Layers
 
