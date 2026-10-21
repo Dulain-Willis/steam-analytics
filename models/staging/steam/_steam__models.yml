@@ -96,3 +96,67 @@ models:
     columns:
       - name: event_id
         tests: [unique, not_null]
+
+unit_tests:
+  - name: test_stg_steam__purchases_collapses_a_business_key_duplicate
+    description: >
+      #133: a double-submitted purchase lands in the landing table as two
+      rows sharing (user_id, game_id, purchased_at) with distinct ids and
+      Kafka offsets. Business-key dedupe must collapse the pair to the
+      single highest-offset row, proving the model-boundary behavior the
+      offline unit tests can't reach through generator/Postgres/CDC.
+    model: stg_steam__purchases
+    given:
+      - input: source('steam', 'purchases')
+        rows:
+          - id: purchase-a
+            user_id: user-1
+            game_id: game-1
+            amount_cents: 1999
+            currency: USD
+            payment_method: credit_card
+            purchased_at: "2026-01-01 00:00:00"
+            recorded_at: "2026-01-01 00:00:05"
+            __deleted: false
+            record_metadata: { offset: 1 }
+          - id: purchase-a-dup
+            user_id: user-1
+            game_id: game-1
+            amount_cents: 1999
+            currency: USD
+            payment_method: credit_card
+            purchased_at: "2026-01-01 00:00:00"
+            recorded_at: "2026-01-01 00:00:05"
+            __deleted: false
+            record_metadata: { offset: 2 }
+          # unrelated purchase: must survive dedupe untouched.
+          - id: purchase-b
+            user_id: user-2
+            game_id: game-2
+            amount_cents: 2999
+            currency: USD
+            payment_method: paypal
+            purchased_at: "2026-01-02 00:00:00"
+            recorded_at: "2026-01-02 00:00:05"
+            __deleted: false
+            record_metadata: { offset: 3 }
+    expect:
+      rows:
+        - purchase_id: purchase-a-dup
+          user_id: user-1
+          game_id: game-1
+          amount_cents: 1999
+          currency: USD
+          payment_method: credit_card
+          purchased_at: "2026-01-01 00:00:00"
+          recorded_at: "2026-01-01 00:00:05"
+          is_deleted: false
+        - purchase_id: purchase-b
+          user_id: user-2
+          game_id: game-2
+          amount_cents: 2999
+          currency: USD
+          payment_method: paypal
+          purchased_at: "2026-01-02 00:00:00"
+          recorded_at: "2026-01-02 00:00:05"
+          is_deleted: false

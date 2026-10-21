@@ -68,6 +68,15 @@ models:
       One row per purchase. amount_usd is derived from amount_cents via an
       FX join to the fx_rates seed. Singular tests in tests/ cover
       amount_usd non-null / sane-ratio coverage.
+    tests:
+      # #133: purchase_key is unique by construction (derived from
+      # purchase_id), which would stay green even if two distinct
+      # purchase_ids reached this fact for the same business event — this
+      # is the test that actually catches a business-key duplicate
+      # surviving stg_steam__purchases' dedupe.
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [user_key, game_key, purchased_at]
     columns:
       - name: purchase_key
         tests: [unique, not_null]
