@@ -53,14 +53,13 @@ client_events as (
 
     from {{ ref('stg_steam__client_events') }}
 
-    where
-        event_name in (
-            'store_page_view',
-            'game_page_view',
-            'add_to_wishlist',
-            'begin_checkout',
-            'purchase_complete'
-        )
+    where event_name in (
+        'store_page_view',
+        'game_page_view',
+        'add_to_wishlist',
+        'begin_checkout',
+        'purchase_complete'
+    )
 
 ),
 
