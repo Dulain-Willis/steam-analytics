@@ -108,6 +108,16 @@ models:
               arguments:
                 to: ref('dim_games')
                 field: game_key
+      - name: purchased_at
+        description: >
+          Not-null guard for the business-key dedupe/uniqueness test above
+          (#133) -- SQL treats NULL = NULL as a match in both qualify
+          row_number() and unique_combination_of_columns, so an unexpected
+          null here would silently merge unrelated purchases rather than
+          fail loudly. purchased_at is not-null at the OLTP source
+          (db/schema.sql); this test exists to catch a CDC/schema drift
+          that would otherwise defeat it.
+        tests: [not_null]
 
   - name: fct_refunds
     description: >

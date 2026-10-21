@@ -75,6 +75,15 @@ models:
     columns:
       - name: purchase_id
         tests: [unique, not_null]
+      - name: purchased_at
+        description: >
+          Not-null guard for the business-key dedupe above (#133) -- SQL's
+          qualify row_number() treats NULL = NULL as a match, so a null
+          purchased_at would silently merge unrelated purchases into the
+          same dedupe partition instead of failing loudly. Not-null at the
+          OLTP source (db/schema.sql); this test catches CDC/schema drift
+          that would otherwise defeat it.
+        tests: [not_null]
 
   - name: stg_steam__ownership_grants
     description: One row per ownership grant (purchase, gift, or key redemption).
