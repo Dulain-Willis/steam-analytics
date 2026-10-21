@@ -3,96 +3,286 @@ version: 2
 models:
   - name: stg_steam__users
     description: One row per user. Type-1, latest attributes only.
+    # No recorded_at on this table (low-frequency reference data) - volume
+    # only, keyed on the column that actually changes, created_at.
+    tests:
+      - elementary.volume_anomalies:
+          arguments:
+            timestamp_column: created_at
+            time_bucket: { period: hour, count: 1 }
+          config:
+            severity: warn
     columns:
       - name: user_id
         tests: [unique, not_null]
 
   - name: stg_steam__games
     description: One row per game. Type-1, latest attributes only.
+    tests:
+      - elementary.volume_anomalies:
+          arguments:
+            timestamp_column: created_at
+            time_bucket: { period: hour, count: 1 }
+          config:
+            severity: warn
     columns:
       - name: game_id
         tests: [unique, not_null]
 
   - name: stg_steam__game_prices
     description: One row per (game, region) current price.
+    tests:
+      - elementary.volume_anomalies:
+          arguments:
+            timestamp_column: updated_at
+            time_bucket: { period: hour, count: 1 }
+          config:
+            severity: warn
     columns:
       - name: game_price_id
         tests: [unique, not_null]
 
   - name: stg_steam__marketing_campaigns
     description: One row per marketing campaign.
+    tests:
+      - elementary.volume_anomalies:
+          arguments:
+            timestamp_column: created_at
+            time_bucket: { period: hour, count: 1 }
+          config:
+            severity: warn
     columns:
       - name: marketing_campaign_id
         tests: [unique, not_null]
 
   - name: stg_steam__purchases
     description: One row per purchase.
+    # recorded_at is arrival time, not purchased_at's event time - the
+    # anomaly tests below watch arrival volume/cadence, complementing (not
+    # duplicating) the fixed-threshold source freshness check on this same
+    # table (see CONTEXT.md, Pipeline Health).
+    tests:
+      - elementary.volume_anomalies:
+          arguments:
+            timestamp_column: recorded_at
+            time_bucket: { period: hour, count: 1 }
+          config:
+            severity: warn
+      - elementary.freshness_anomalies:
+          arguments:
+            timestamp_column: recorded_at
+            time_bucket: { period: hour, count: 1 }
+          config:
+            severity: warn
     columns:
       - name: purchase_id
         tests: [unique, not_null]
 
   - name: stg_steam__ownership_grants
     description: One row per ownership grant (purchase, gift, or key redemption).
+    tests:
+      - elementary.volume_anomalies:
+          arguments:
+            timestamp_column: recorded_at
+            time_bucket: { period: hour, count: 1 }
+          config:
+            severity: warn
+      - elementary.freshness_anomalies:
+          arguments:
+            timestamp_column: recorded_at
+            time_bucket: { period: hour, count: 1 }
+          config:
+            severity: warn
     columns:
       - name: ownership_grant_id
         tests: [unique, not_null]
 
   - name: stg_steam__gifts
     description: One row per gift.
+    tests:
+      - elementary.volume_anomalies:
+          arguments:
+            timestamp_column: recorded_at
+            time_bucket: { period: hour, count: 1 }
+          config:
+            severity: warn
+      - elementary.freshness_anomalies:
+          arguments:
+            timestamp_column: recorded_at
+            time_bucket: { period: hour, count: 1 }
+          config:
+            severity: warn
     columns:
       - name: gift_id
         tests: [unique, not_null]
 
   - name: stg_steam__key_redemptions
     description: One row per key redemption.
+    tests:
+      - elementary.volume_anomalies:
+          arguments:
+            timestamp_column: recorded_at
+            time_bucket: { period: hour, count: 1 }
+          config:
+            severity: warn
+      - elementary.freshness_anomalies:
+          arguments:
+            timestamp_column: recorded_at
+            time_bucket: { period: hour, count: 1 }
+          config:
+            severity: warn
     columns:
       - name: key_redemption_id
         tests: [unique, not_null]
 
   - name: stg_steam__refunds
     description: One row per refund.
+    tests:
+      - elementary.volume_anomalies:
+          arguments:
+            timestamp_column: recorded_at
+            time_bucket: { period: hour, count: 1 }
+          config:
+            severity: warn
+      - elementary.freshness_anomalies:
+          arguments:
+            timestamp_column: recorded_at
+            time_bucket: { period: hour, count: 1 }
+          config:
+            severity: warn
     columns:
       - name: refund_id
         tests: [unique, not_null]
 
   - name: stg_steam__family_shares
     description: One row per family share.
+    tests:
+      - elementary.volume_anomalies:
+          arguments:
+            timestamp_column: recorded_at
+            time_bucket: { period: hour, count: 1 }
+          config:
+            severity: warn
+      - elementary.freshness_anomalies:
+          arguments:
+            timestamp_column: recorded_at
+            time_bucket: { period: hour, count: 1 }
+          config:
+            severity: warn
     columns:
       - name: family_share_id
         tests: [unique, not_null]
 
   - name: stg_steam__wishlist_items
     description: One row per wishlist add.
+    tests:
+      - elementary.volume_anomalies:
+          arguments:
+            timestamp_column: recorded_at
+            time_bucket: { period: hour, count: 1 }
+          config:
+            severity: warn
+      - elementary.freshness_anomalies:
+          arguments:
+            timestamp_column: recorded_at
+            time_bucket: { period: hour, count: 1 }
+          config:
+            severity: warn
     columns:
       - name: wishlist_item_id
         tests: [unique, not_null]
 
   - name: stg_steam__playtime_sessions
     description: One row per playtime session.
+    tests:
+      - elementary.volume_anomalies:
+          arguments:
+            timestamp_column: recorded_at
+            time_bucket: { period: hour, count: 1 }
+          config:
+            severity: warn
+      - elementary.freshness_anomalies:
+          arguments:
+            timestamp_column: recorded_at
+            time_bucket: { period: hour, count: 1 }
+          config:
+            severity: warn
     columns:
       - name: playtime_session_id
         tests: [unique, not_null]
 
   - name: stg_steam__reviews
     description: One row per review.
+    tests:
+      - elementary.volume_anomalies:
+          arguments:
+            timestamp_column: recorded_at
+            time_bucket: { period: hour, count: 1 }
+          config:
+            severity: warn
+      - elementary.freshness_anomalies:
+          arguments:
+            timestamp_column: recorded_at
+            time_bucket: { period: hour, count: 1 }
+          config:
+            severity: warn
     columns:
       - name: review_id
         tests: [unique, not_null]
 
   - name: stg_steam__price_changes
     description: One row per price change event, replayed into dim_game_prices.
+    tests:
+      - elementary.volume_anomalies:
+          arguments:
+            timestamp_column: recorded_at
+            time_bucket: { period: hour, count: 1 }
+          config:
+            severity: warn
+      - elementary.freshness_anomalies:
+          arguments:
+            timestamp_column: recorded_at
+            time_bucket: { period: hour, count: 1 }
+          config:
+            severity: warn
     columns:
       - name: price_change_id
         tests: [unique, not_null]
 
   - name: stg_steam__concurrent_player_snapshots
     description: One row per game per concurrent-player snapshot.
+    tests:
+      - elementary.volume_anomalies:
+          arguments:
+            timestamp_column: recorded_at
+            time_bucket: { period: hour, count: 1 }
+          config:
+            severity: warn
+      - elementary.freshness_anomalies:
+          arguments:
+            timestamp_column: recorded_at
+            time_bucket: { period: hour, count: 1 }
+          config:
+            severity: warn
     columns:
       - name: concurrent_player_snapshot_id
         tests: [unique, not_null]
 
   - name: stg_steam__client_events
     description: One row per client-side funnel event.
+    tests:
+      - elementary.volume_anomalies:
+          arguments:
+            timestamp_column: recorded_at
+            time_bucket: { period: hour, count: 1 }
+          config:
+            severity: warn
+      - elementary.freshness_anomalies:
+          arguments:
+            timestamp_column: recorded_at
+            time_bucket: { period: hour, count: 1 }
+          config:
+            severity: warn
     columns:
       - name: event_id
         tests: [unique, not_null]
