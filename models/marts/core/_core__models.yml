@@ -2,12 +2,19 @@ version: 2
 
 models:
   - name: dim_users
-    description: One row per user. Type 1, latest attributes only.
+    description: >
+      One row per user. Type 1, latest attributes only. Plus exactly one
+      sentinel row (user_id = 'unknown_member', is_unknown_member = true)
+      that an orphan client_events.user_id resolves to (steam-infra #141) -
+      distinct from the campaign_id null-means-organic convention below, no
+      fake campaign row is introduced for that case.
     columns:
       - name: user_key
         tests: [unique, not_null]
       - name: user_id
         tests: [unique, not_null]
+      - name: is_unknown_member
+        tests: [not_null]
       - name: campaign_id
         description: >
           Immutable first-touch attribution, set once at signup. NULL =

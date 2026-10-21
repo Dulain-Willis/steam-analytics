@@ -1,0 +1,54 @@
+version: 2
+
+# Model-boundary dbt unit tests (fixture rows in, expected rows out, no
+# warehouse data). See models/marts/core/_core__unit_tests.yml for the
+# pattern notes this file follows.
+
+unit_tests:
+  - name: test_fct_product_funnel_sessions_orphan_resolves_to_unknown_member
+    description: >
+      A client_events.user_id with no matching dim_users row (steam-infra
+      #140's dropped FK) resolves to the unknown-member sentinel rather
+      than being dropped by the join (steam-infra #141).
+    model: fct_product_funnel_sessions
+    given:
+      - input: ref('stg_steam__client_events')
+        rows:
+          - event_id: e1
+            session_id: s1
+            user_id: orphan_user
+            event_name: store_page_view
+            occurred_at: "2024-01-01 00:00:00"
+            is_deleted: false
+      - input: ref('dim_users')
+        rows:
+          - user_id: some_other_user
+    expect:
+      rows:
+        - session_id: s1
+          user_id: orphan_user
+          resolved_user_id: unknown_member
+
+  - name: test_fct_product_funnel_sessions_late_arriving_parent_attaches
+    description: >
+      Once the late-arriving parent user row has landed in dim_users
+      (steam-infra #140's other orphan flavour), the session's events
+      resolve to that real user, not the unknown-member sentinel.
+    model: fct_product_funnel_sessions
+    given:
+      - input: ref('stg_steam__client_events')
+        rows:
+          - event_id: e2
+            session_id: s2
+            user_id: late_user
+            event_name: store_page_view
+            occurred_at: "2024-01-01 00:00:00"
+            is_deleted: false
+      - input: ref('dim_users')
+        rows:
+          - user_id: late_user
+    expect:
+      rows:
+        - session_id: s2
+          user_id: late_user
+          resolved_user_id: late_user

@@ -99,7 +99,7 @@ mechanism rather than assumed:
 | Business-key duplicates (continuous, purchases) | second row, same business key, distinct PK | **Yes** — `volume_anomalies` on both `stg_steam__purchases` (`recorded_at`) and `fct_purchases` (`purchased_at`); the duplicate lands in the same bucket as its twin either way. | `volume_anomalies` is a real backstop here — it would have caught this even if the purpose-written `dbt_utils.unique_combination_of_columns` test (#133) had never been written. |
 | Late arrival (continuous, client_events/playtime_sessions) | row written now, event-time backdated up to 7d | **No.** It substitutes for an on-time row rather than adding one, so table-wide row count is unaffected, and `recorded_at`'s max is always "now" regardless. Freshness-by-event-time is also unaffected, since on-time rows keep the max fresh. | #137's purpose-built arrival-lag monitor (compares `occurred_at`/`started_at` against `recorded_at` against the configured lookback window) — a bespoke Pipeline Health model, not a generic anomaly test. |
 | Unknown enum value onset (payment_method) | new value in an existing column | **No.** Same row count, same timing — only a value changes. Neither row-count nor recency anomaly detection can see a value distribution shift. | Purpose-written warn-severity `accepted_values` test (#139). No anomaly-detection fallback exists for this class. |
-| Orphan references (client_events.user_id, FK dropped) | child rows with no matching parent | **No**, as configured — table-wide event volume is unaffected by orphan rate (the same number of child rows arrive either way). Spec names a narrower variant ("anomaly detection on orphan volume") scoped to the unknown-member join via `where_expression`, but that needs the unknown-member row #140/#141 add, which doesn't exist yet. | Purpose-written warn-severity `relationships` test (#141) today; a `where_expression`-scoped `volume_anomalies` on the unknown-member count is a natural follow-on once #140/#141 land. |
+| Orphan references (client_events.user_id, FK dropped) | child rows with no matching parent | **No**, as configured — table-wide event volume is unaffected by orphan rate (the same number of child rows arrive either way). Spec names a narrower variant ("anomaly detection on orphan volume") scoped to the unknown-member join via `where_expression` - a natural follow-on now that #141's unknown-member row exists, but not configured yet. | Purpose-written warn-severity `relationships` test on `fct_product_funnel_sessions.user_id` → `dim_users.user_id` (#141). |
 | Compliance erasure (one-shot scenario) | hard-delete / anonymize / retain, per-user | **No**, not at realistic drill scale — one user's rows are noise against daily volume/freshness. | Purpose-written singular tests (#143): no erased user's behavioral rows persist; retained transaction rows survive erasure. |
 | Schema evolution (one-shot scenario, additive column) | new nullable column on `games` | **No** — not a volume or freshness signal at all; it's a column-shape change. | dbt contract enforcement (#144) failing the build on a breaking change — a structural mechanism, not an anomaly test or a hand-written assertion. |
 
@@ -146,7 +146,28 @@ CONTEXT.md. The dbt-side terms:
 - **dim_users** — type 1. One row per user, latest attributes. Carries
   `country` (nullable until infra ticket) and immutable first-touch
   `campaign_id` (nullable; `NULL` = organic/direct, *not* a fake "organic"
-  campaign row).
+  campaign row). Also carries exactly one **unknown member** row (see
+  below) - a distinct mechanism from the `campaign_id` null convention,
+  not to be conflated with it.
+- **unknown member** — the single sentinel `dim_users` row
+  (`user_id = 'unknown_member'`, `is_unknown_member = true`) that an orphan
+  `client_events.user_id` resolves to, instead of being silently dropped by
+  an inner join (steam-infra #140 dropped the `client_events.user_id` →
+  `users` foreign key; #141 is the handling half). Produced by a `union all`
+  inside `dim_users.sql` itself, not a seed or a separate model - every
+  consumer that already `ref()`s `dim_users` gets it for free, with no
+  second place to keep in sync. The sentinel `user_id` literal lives in one
+  macro (`macros/unknown_member.sql`'s `unknown_member_user_id()`), shared
+  by `dim_users` (which unions in the row) and any model that resolves
+  `client_events.user_id` against it (today, `fct_product_funnel_sessions`),
+  so the two can never drift apart.
+- **orphan rate** — the share of `client_events` rows whose `user_id` has no
+  matching `users`/`dim_users` row. Reported, not enforced: a
+  warn-severity `relationships` test on `fct_product_funnel_sessions.user_id`
+  → `dim_users.user_id` (steam-infra #141) surfaces the volume without
+  failing the build, since a steady trickle of late-arriving/never-arriving
+  parents (steam-infra #140's two orphan flavours) is expected traffic and
+  only a spike indicates a real break.
 - **dim_games** — type 1. One row per game.
 - **dim_game_prices** — genuine **SCD2**. One row per
   `game_id × region × [valid_from, valid_to)`, replayed from the

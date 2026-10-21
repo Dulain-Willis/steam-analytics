@@ -1,0 +1,53 @@
+version: 2
+
+# Model-boundary dbt unit tests (fixture rows in, expected rows out, no
+# warehouse data). First use of dbt's native `unit_tests:` block in this
+# project (see CONTEXT.md's "lookback window" glossary entry and
+# analytics.md) - #133/#136/#138/#139/#141/#143/#144 all reuse this exact
+# shape. Pattern notes for the next ticket to copy this:
+#
+# - Keep each unit test in this file, not inline in _core__models.yml, so
+#   schema tests (generic column tests) and unit tests (fixture-based model
+#   tests) don't crowd the same file.
+# - A unit test against an incremental model MUST set
+#   `overrides.macros.is_incremental` (true or false) - dbt's parser raises
+#   otherwise. When true, it MUST also give a `this` input, since the
+#   model's incremental filter queries `{{ this }}` for the prior high-water
+#   mark.
+# - Unit tests run actual SQL against the configured adapter - they are not
+#   a pure-local check. `dbt parse` only proves the test is structurally
+#   valid (resolves, overrides present, columns line up); running it for
+#   real needs a live target.
+
+unit_tests:
+  - name: test_dim_users_always_has_unknown_member
+    description: >
+      dim_users unions in exactly one unknown-member sentinel row
+      regardless of what stg_steam__users contains (steam-infra #141) -
+      proves the sentinel isn't dependent on any real user data existing.
+      tenure_days is omitted from expect since it's derived from
+      current_date() and not static.
+    model: dim_users
+    given:
+      - input: ref('stg_steam__users')
+        rows:
+          - user_id: u1
+            username: alice
+            email: alice@example.com
+            country: US
+            campaign_id: c1
+            created_at: "2024-01-01 00:00:00"
+            deletion_requested_at: null
+            is_deleted: false
+    expect:
+      rows:
+        - user_id: u1
+          username: alice
+          country: US
+          campaign_id: c1
+          is_unknown_member: false
+        - user_id: unknown_member
+          username: Unknown member
+          country: null
+          campaign_id: null
+          is_unknown_member: true

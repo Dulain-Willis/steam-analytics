@@ -4,6 +4,13 @@
 -- purchase_complete is tracked here as a marker event only - dollar /
 -- grant detail belongs to fct_ownership_grants, not this model's event
 -- props.
+--
+-- client_events.user_id can be orphaned (steam-infra #140 dropped the FK):
+-- a left join to dim_users, not inner, is what keeps an orphan session from
+-- silently vanishing (steam-infra #141). resolved_user_id falls back to the
+-- unknown-member sentinel when no dim_users row matches; raw user_id is
+-- kept alongside it so the relationships test below can still report
+-- orphan volume.
 with
 
 client_events as (
@@ -28,11 +35,36 @@ client_events as (
 
 ),
 
+users as (
+
+    select user_id
+
+    from {{ ref('dim_users') }}
+
+),
+
+client_events_resolved as (
+
+    select
+        client_events.session_id,
+        client_events.user_id,
+        coalesce(users.user_id, '{{ unknown_member_user_id() }}') as resolved_user_id,
+        client_events.event_name,
+        client_events.occurred_at
+
+    from client_events
+
+    left join users
+        on client_events.user_id = users.user_id
+
+),
+
 session_stage_timestamps as (
 
     select
         session_id,
         user_id,
+        resolved_user_id,
         min(occurred_at) as session_started_at,
         min(
 
@@ -70,10 +102,11 @@ session_stage_timestamps as (
 
         ) as purchase_complete_at
 
-    from client_events
+    from client_events_resolved
 
     group by 1,
-        2
+        2,
+        3
 
 ),
 
@@ -82,6 +115,7 @@ final as (
     select
         session_id,
         user_id,
+        resolved_user_id,
         {{ dbt_utils.generate_surrogate_key(['session_id']) }} as funnel_session_key,
         date(session_started_at) as session_date,
         session_started_at,
