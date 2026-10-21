@@ -5,25 +5,37 @@
 -- grant detail belongs to fct_ownership_grants, not this model's event
 -- props.
 --
--- Incremental merge on funnel_session_key (#135, copying #134's pattern).
--- The filter guards each underlying client_events row on its own
--- recorded_at (arrival timestamp), not occurred_at (event timestamp),
--- same as every other incremental fact in this project - a restated or
--- late-arriving event keeps its original occurred_at but re-lands with a
--- fresh recorded_at. recorded_at is kept on the output as the max across
--- a session's events, so max(recorded_at) is readable straight off this
--- table on the next run.
+-- Incremental merge on funnel_session_key (#135, copying #134's pattern),
+-- with one wrinkle this model's grain forces: every other incremental
+-- fact in this project is 1 output row per 1 input row, so filtering the
+-- input by recorded_at and passing it straight to the merge is correct -
+-- the merge just leaves any row it didn't touch alone. This model
+-- aggregates many client_events rows into one row per session_id, and
+-- the merge replaces a session's entire row wholesale. Filtering
+-- individual events by recorded_at and aggregating only the surviving
+-- subset (the naive copy of the other two models' shape) would silently
+-- regress an already-recorded stage any time a session's later event
+-- arrives after an earlier stage's event has aged out of the lookback
+-- window - the recompute would be missing that earlier event entirely,
+-- and the merge has no way to know the row it's about to overwrite had
+-- more history than what's in front of it this run. So the filter here
+-- decides which *sessions* to touch (any session with at least one event
+-- recorded within the window), then every touched session is
+-- re-aggregated from its *complete* event history, not just the
+-- in-window slice - the merge always replaces a touched row with a fully
+-- correct one, same as a full rebuild would produce for that session.
 --
--- is_deleted is NOT filtered out of client_events before aggregating
--- (unlike the prior table-materialized version): incremental_strategy=
--- 'merge' only ever upserts sessions present in this model's own select
--- for the current window. If a session's only surviving (non-deleted)
--- event fell outside this run's window, filtering deleted events out
--- here would make the session vanish from the select entirely - and the
--- merge can't retroactively delete its already-materialized row. Instead
--- is_deleted on the output is true only when every event contributing to
--- the session in this run is deleted (booland_agg), and every downstream
--- consumer filters `where not is_deleted` itself.
+-- is_deleted is carried through unfiltered at the session grain (true
+-- only when every event contributing to the session is deleted,
+-- booland_agg) for the same reason #134 established: a merge can't
+-- delete a row that drops out of its own select. But individually
+-- deleted events must still be excluded from the stage timestamps/
+-- has_reached_* booleans themselves (session_started_at is the one
+-- exception - it's a marker, not a stage claim, so it still reflects the
+-- session's full event history even if every event in it is deleted,
+-- keeping it not-null) - otherwise a session with a mix of deleted and
+-- live events would count a deleted event as a reached funnel stage.
+-- Every downstream consumer filters `where not is_deleted` itself.
 --
 -- on_schema_change='fail' (#144): a contract-enforced incremental model
 -- can't use the default 'ignore' - dbt requires 'append_new_columns' or
@@ -65,13 +77,24 @@ client_events as (
 
 {% if is_incremental() %}
 
-    within_lookback_window as (
+    touched_sessions as (
 
-        select *
+        select distinct session_id
 
         from client_events
 
         where {{ incremental_lookback_filter() }}
+
+    ),
+
+    client_events_for_touched_sessions as (
+
+        select client_events.*
+
+        from client_events
+
+        inner join touched_sessions
+            on client_events.session_id = touched_sessions.session_id
 
     ),
 
@@ -88,40 +111,55 @@ session_stage_timestamps as (
         min(
 
             case
-                when event_name = 'store_page_view' then occurred_at
+                when event_name = 'store_page_view'
+                    and not is_deleted
+                    then occurred_at
             end
 
         ) as store_page_view_at,
         min(
 
             case
-                when event_name = 'game_page_view' then occurred_at
+                when event_name = 'game_page_view'
+                    and not is_deleted
+                    then occurred_at
             end
 
         ) as game_page_view_at,
         min(
 
             case
-                when event_name = 'add_to_wishlist' then occurred_at
+                when event_name = 'add_to_wishlist'
+                    and not is_deleted
+                    then occurred_at
             end
 
         ) as add_to_wishlist_at,
         min(
 
             case
-                when event_name = 'begin_checkout' then occurred_at
+                when event_name = 'begin_checkout'
+                    and not is_deleted
+                    then occurred_at
             end
 
         ) as begin_checkout_at,
         min(
 
             case
-                when event_name = 'purchase_complete' then occurred_at
+                when event_name = 'purchase_complete'
+                    and not is_deleted
+                    then occurred_at
             end
 
         ) as purchase_complete_at
 
-    from {{ 'within_lookback_window' if is_incremental() else 'client_events' }}
+    from
+        {{
+        'client_events_for_touched_sessions'
+        if is_incremental()
+        else 'client_events'
+    }}
 
     group by 1,
         2
