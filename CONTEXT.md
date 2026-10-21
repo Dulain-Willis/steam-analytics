@@ -25,6 +25,18 @@ a synonym is listed as *avoid*, do not drift to it.
   `__source_table`, `__source_txid`, `__deleted`. Together with `RECORD_METADATA`,
   these are dropped by the `stg` layer — except `is_deleted`, which a `stg` model
   derives from `__deleted`.
+- **deletion propagation** — how a hard delete in `steam-infra` (compliance
+  erasure or retention purge, `steam-infra`'s `scenarios/deletion_execution.py`,
+  #143) reaches marts: the source connector's rewrite-mode delete handling
+  emits a real row carrying `__deleted = TRUE` and the primary key, which
+  lands in the landing table like any other change, is turned into
+  `is_deleted` by the `stg` layer (offset dedupe already picks the
+  highest-offset row per primary key, so a delete at a later offset always
+  wins over the row it deletes), and is then excluded by every mart that
+  filters `where not is_deleted` — no `DELETE` ever runs in Snowflake.
+  `fct_product_funnel_sessions` is the one mart that refs a `stg` model
+  directly rather than through `marts/core` (Acquisition section below) and
+  must apply the same filter itself rather than inheriting it.
 - **source event time** — `__source_ts_ms`, the database commit time of the
   change (epoch ms). The freshness `loaded_at_field`. *Avoid* `RECORD_METADATA`
   `CreateTime` (Kafka produce time, reset on every re-snapshot).
@@ -112,6 +124,38 @@ bespoke monitor, because the fault changes something anomaly detection
 configured does not map cleanly onto any of the seven classes either — its
 practical value is as a general pipeline-health safety net (e.g. a stalled
 upstream) that sits alongside, not on top of, the seven-class taxonomy.
+
+### Schema evolution & contracts
+
+- **schema evolution** — a shape change made directly against a
+  `steam-infra` source table (an `alter table`), outside any coordinated
+  release. *Additive* evolution (a new nullable column — see
+  `steam-infra`'s `scenarios/games_add_column.py`, #144) needs no
+  coordinated release at all: Snowflake's schema-evolution feature
+  (`snowflake.enable.schematization=true`, [ADR 0001](docs/adr/0001-cdc-landing-shape.md))
+  adds the matching column to the landing table automatically on the
+  connector's next change event, and every `stg` model keeps building
+  unchanged because its final `select` already names its output columns
+  explicitly rather than `select *`-ing the landing table. A *breaking*
+  evolution (a rename, a type change, a drop) is a deliberate follow-up,
+  out of scope for #144 — that's exactly the case a **contract** (below)
+  is built to catch.
+- **contract** — a declared, enforced shape on a **published** model's
+  output: `config: {contract: {enforced: true}}` plus a `data_type` on
+  every column in that model's schema yml. *Published* here means every
+  model in `models/marts/{core,product,marketing,finance}` **except**
+  Pipeline Health (`fct_dbt_test_results`, `fct_source_freshness`,
+  `fct_row_counts`) — Pipeline Health is internal observability fed by
+  the vendored `elementary` package rather than a business-owned shape,
+  and contracting it would pin this project to elementary's own upstream
+  schema. A contracted model whose SQL stops producing a declared column,
+  or changes one's type, fails the build (`dbt build`/`dbt run` raises a
+  contract error) instead of silently reshaping a table a spoke team or
+  BI tool depends on. A contract only constrains the columns a model
+  actually declares — an additive upstream column that a model never
+  selects never trips it, which is why schema evolution and contracts are
+  complementary, not redundant: one lets harmless change through
+  silently, the other stops harmful change loudly.
 
 ### Environments
 

@@ -7,14 +7,21 @@ models:
       active that day; wau = trailing 7-calendar-day distinct count. Global,
       no cohort split (see fct_product_session_length_daily for that).
       Singular test in tests/ covers non-negative measures and wau >= dau.
+    config:
+      contract:
+        enforced: true
     columns:
-      - name: active_users_daily_key
-        tests: [unique, not_null]
       - name: active_date
+        data_type: date
+        tests: [unique, not_null]
+      - name: active_users_daily_key
+        data_type: varchar
         tests: [unique, not_null]
       - name: dau
+        data_type: number
         tests: [not_null]
       - name: wau
+        data_type: number
         tests: [not_null]
 
   - name: fct_product_session_length_daily
@@ -25,12 +32,15 @@ models:
       and 'returning' on every later one. Open sessions are excluded - a
       session with no duration can't contribute to session length.
       Singular test in tests/ covers non-negative measures.
+    config:
+      contract:
+        enforced: true
     columns:
-      - name: session_length_daily_key
-        tests: [unique, not_null]
       - name: started_date
+        data_type: date
         tests: [not_null]
       - name: game_key
+        data_type: varchar
         tests:
           - not_null
           - relationships:
@@ -38,11 +48,23 @@ models:
                 to: ref('dim_games')
                 field: game_key
       - name: user_cohort
+        data_type: varchar
         tests:
           - not_null
           - accepted_values:
               arguments:
                 values: ['new', 'returning']
+      - name: session_length_daily_key
+        data_type: varchar
+        tests: [unique, not_null]
+      - name: session_count
+        data_type: number
+      - name: avg_duration_minutes
+        data_type: float
+      - name: p50_duration_minutes
+        data_type: float
+      - name: p90_duration_minutes
+        data_type: float
 
   - name: fct_product_wishlist_conversion
     description: >
@@ -53,10 +75,12 @@ models:
       the earliest such grant, over converted rows only. Singular tests in
       tests/ cover non-negative measures and independently re-derive the
       conversion logic from the core facts.
+    config:
+      contract:
+        enforced: true
     columns:
-      - name: wishlist_conversion_key
-        tests: [unique, not_null]
       - name: game_key
+        data_type: varchar
         tests:
           - unique
           - not_null
@@ -64,12 +88,20 @@ models:
               arguments:
                 to: ref('dim_games')
                 field: game_key
+      - name: wishlist_conversion_key
+        data_type: varchar
+        tests: [unique, not_null]
       - name: wishlist_add_count
+        data_type: number
         tests: [not_null]
       - name: converted_count
+        data_type: number
         tests: [not_null]
       - name: conversion_rate
+        data_type: float
         tests: [not_null]
+      - name: median_days_to_convert
+        data_type: float
 
   - name: fct_product_funnel_sessions
     description: >
@@ -87,12 +119,15 @@ models:
       steam-infra #140/#141); resolved_user_id is what the model actually
       resolves it to - the real user, or the unknown-member sentinel row in
       dim_users when no real user matches.
+    config:
+      contract:
+        enforced: true
     columns:
-      - name: funnel_session_key
-        tests: [unique, not_null]
       - name: session_id
+        data_type: varchar
         tests: [unique, not_null]
       - name: user_id
+        data_type: varchar
         description: >
           Raw client_events.user_id, kept only so the relationships test
           below can report orphan volume - not used for joins downstream
@@ -106,6 +141,7 @@ models:
               config:
                 severity: warn
       - name: resolved_user_id
+        data_type: varchar
         description: >
           user_id resolved against dim_users: the real user, or the
           unknown-member sentinel ('unknown_member') when user_id is an
@@ -117,7 +153,113 @@ models:
               arguments:
                 to: ref('dim_users')
                 field: user_id
+      - name: funnel_session_key
+        data_type: varchar
+        tests: [unique, not_null]
       - name: session_date
+        data_type: date
         tests: [not_null]
       - name: session_started_at
+        data_type: timestamp_tz
         tests: [not_null]
+      - name: store_page_view_at
+        data_type: timestamp_tz
+      - name: game_page_view_at
+        data_type: timestamp_tz
+      - name: add_to_wishlist_at
+        data_type: timestamp_tz
+      - name: begin_checkout_at
+        data_type: timestamp_tz
+      - name: purchase_complete_at
+        data_type: timestamp_tz
+      - name: has_reached_store_page_view
+        data_type: boolean
+      - name: has_reached_game_page_view
+        data_type: boolean
+      - name: has_reached_add_to_wishlist
+        data_type: boolean
+      - name: has_reached_begin_checkout
+        data_type: boolean
+      - name: has_reached_purchase_complete
+        data_type: boolean
+
+unit_tests:
+  - name: test_fct_product_funnel_sessions_excludes_deleted_rows
+    description: >
+      #143 model-boundary unit test: a client_event carrying the CDC
+      delete flag must not contribute to fct_product_funnel_sessions --
+      here, a session whose only event is deleted must not appear at
+      all. Fixed input rows, independent of any live drill having run.
+    model: fct_product_funnel_sessions
+    given:
+      - input: ref('stg_steam__client_events')
+        rows:
+          - event_id: "11111111-1111-1111-1111-111111111111"
+            session_id: "s1"
+            user_id: "u1"
+            game_id: "g1"
+            event_name: "store_page_view"
+            occurred_at: "2024-01-01T00:00:00"
+            is_deleted: false
+          - event_id: "22222222-2222-2222-2222-222222222222"
+            session_id: "s2"
+            user_id: "u2"
+            game_id: "g2"
+            event_name: "store_page_view"
+            occurred_at: "2024-06-01T00:00:00"
+            is_deleted: true
+    expect:
+      rows:
+        - session_id: "s1"
+          has_reached_store_page_view: true
+          has_reached_game_page_view: false
+
+  - name: test_fct_product_funnel_sessions_orphan_resolves_to_unknown_member
+    description: >
+      A client_events.user_id with no matching dim_users row (steam-infra
+      #140's dropped FK) resolves to the unknown-member sentinel rather
+      than being dropped by the join (steam-infra #141).
+    model: fct_product_funnel_sessions
+    given:
+      - input: ref('stg_steam__client_events')
+        rows:
+          - event_id: "33333333-3333-3333-3333-333333333333"
+            session_id: "s3"
+            user_id: "orphan_user"
+            game_id: "g1"
+            event_name: "store_page_view"
+            occurred_at: "2024-01-01T00:00:00"
+            is_deleted: false
+      - input: ref('dim_users')
+        rows:
+          - user_id: "some_other_user"
+    expect:
+      rows:
+        - session_id: "s3"
+          user_id: "orphan_user"
+          resolved_user_id: "unknown_member"
+
+  - name: test_fct_product_funnel_sessions_late_arriving_parent_attaches
+    description: >
+      Once the late-arriving parent user row has landed in dim_users
+      (steam-infra #140's other orphan flavour), the session's events
+      resolve to that real user, not the unknown-member sentinel.
+    model: fct_product_funnel_sessions
+    given:
+      - input: ref('stg_steam__client_events')
+        rows:
+          - event_id: "44444444-4444-4444-4444-444444444444"
+            session_id: "s4"
+            user_id: "late_user"
+            game_id: "g1"
+            event_name: "store_page_view"
+            occurred_at: "2024-01-01T00:00:00"
+            is_deleted: false
+      - input: ref('dim_users')
+        rows:
+          - user_id: "late_user"
+    expect:
+      rows:
+        - session_id: "s4"
+          user_id: "late_user"
+          resolved_user_id: "late_user"
