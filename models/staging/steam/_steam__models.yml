@@ -9,7 +9,6 @@ models:
       - elementary.volume_anomalies:
           arguments:
             timestamp_column: created_at
-            time_bucket: { period: hour, count: 1 }
           config:
             severity: warn
     columns:
@@ -18,11 +17,12 @@ models:
 
   - name: stg_steam__games
     description: One row per game. Type-1, latest attributes only.
+    # No freshness_anomalies here either, same reason as stg_steam__users
+    # above: low-frequency reference data, no recorded_at.
     tests:
       - elementary.volume_anomalies:
           arguments:
             timestamp_column: created_at
-            time_bucket: { period: hour, count: 1 }
           config:
             severity: warn
     columns:
@@ -31,11 +31,11 @@ models:
 
   - name: stg_steam__game_prices
     description: One row per (game, region) current price.
+    # Same reason as stg_steam__users - no freshness_anomalies.
     tests:
       - elementary.volume_anomalies:
           arguments:
             timestamp_column: updated_at
-            time_bucket: { period: hour, count: 1 }
           config:
             severity: warn
     columns:
@@ -44,11 +44,11 @@ models:
 
   - name: stg_steam__marketing_campaigns
     description: One row per marketing campaign.
+    # Same reason as stg_steam__users - no freshness_anomalies.
     tests:
       - elementary.volume_anomalies:
           arguments:
             timestamp_column: created_at
-            time_bucket: { period: hour, count: 1 }
           config:
             severity: warn
     columns:
@@ -65,13 +65,11 @@ models:
       - elementary.volume_anomalies:
           arguments:
             timestamp_column: recorded_at
-            time_bucket: { period: hour, count: 1 }
           config:
             severity: warn
       - elementary.freshness_anomalies:
           arguments:
             timestamp_column: recorded_at
-            time_bucket: { period: hour, count: 1 }
           config:
             severity: warn
     columns:
@@ -84,13 +82,11 @@ models:
       - elementary.volume_anomalies:
           arguments:
             timestamp_column: recorded_at
-            time_bucket: { period: hour, count: 1 }
           config:
             severity: warn
       - elementary.freshness_anomalies:
           arguments:
             timestamp_column: recorded_at
-            time_bucket: { period: hour, count: 1 }
           config:
             severity: warn
     columns:
@@ -103,13 +99,11 @@ models:
       - elementary.volume_anomalies:
           arguments:
             timestamp_column: recorded_at
-            time_bucket: { period: hour, count: 1 }
           config:
             severity: warn
       - elementary.freshness_anomalies:
           arguments:
             timestamp_column: recorded_at
-            time_bucket: { period: hour, count: 1 }
           config:
             severity: warn
     columns:
@@ -122,13 +116,11 @@ models:
       - elementary.volume_anomalies:
           arguments:
             timestamp_column: recorded_at
-            time_bucket: { period: hour, count: 1 }
           config:
             severity: warn
       - elementary.freshness_anomalies:
           arguments:
             timestamp_column: recorded_at
-            time_bucket: { period: hour, count: 1 }
           config:
             severity: warn
     columns:
@@ -141,13 +133,11 @@ models:
       - elementary.volume_anomalies:
           arguments:
             timestamp_column: recorded_at
-            time_bucket: { period: hour, count: 1 }
           config:
             severity: warn
       - elementary.freshness_anomalies:
           arguments:
             timestamp_column: recorded_at
-            time_bucket: { period: hour, count: 1 }
           config:
             severity: warn
     columns:
@@ -160,13 +150,11 @@ models:
       - elementary.volume_anomalies:
           arguments:
             timestamp_column: recorded_at
-            time_bucket: { period: hour, count: 1 }
           config:
             severity: warn
       - elementary.freshness_anomalies:
           arguments:
             timestamp_column: recorded_at
-            time_bucket: { period: hour, count: 1 }
           config:
             severity: warn
     columns:
@@ -179,13 +167,11 @@ models:
       - elementary.volume_anomalies:
           arguments:
             timestamp_column: recorded_at
-            time_bucket: { period: hour, count: 1 }
           config:
             severity: warn
       - elementary.freshness_anomalies:
           arguments:
             timestamp_column: recorded_at
-            time_bucket: { period: hour, count: 1 }
           config:
             severity: warn
     columns:
@@ -198,13 +184,11 @@ models:
       - elementary.volume_anomalies:
           arguments:
             timestamp_column: recorded_at
-            time_bucket: { period: hour, count: 1 }
           config:
             severity: warn
       - elementary.freshness_anomalies:
           arguments:
             timestamp_column: recorded_at
-            time_bucket: { period: hour, count: 1 }
           config:
             severity: warn
     columns:
@@ -217,13 +201,11 @@ models:
       - elementary.volume_anomalies:
           arguments:
             timestamp_column: recorded_at
-            time_bucket: { period: hour, count: 1 }
           config:
             severity: warn
       - elementary.freshness_anomalies:
           arguments:
             timestamp_column: recorded_at
-            time_bucket: { period: hour, count: 1 }
           config:
             severity: warn
     columns:
@@ -236,13 +218,11 @@ models:
       - elementary.volume_anomalies:
           arguments:
             timestamp_column: recorded_at
-            time_bucket: { period: hour, count: 1 }
           config:
             severity: warn
       - elementary.freshness_anomalies:
           arguments:
             timestamp_column: recorded_at
-            time_bucket: { period: hour, count: 1 }
           config:
             severity: warn
     columns:
@@ -255,13 +235,11 @@ models:
       - elementary.volume_anomalies:
           arguments:
             timestamp_column: recorded_at
-            time_bucket: { period: hour, count: 1 }
           config:
             severity: warn
       - elementary.freshness_anomalies:
           arguments:
             timestamp_column: recorded_at
-            time_bucket: { period: hour, count: 1 }
           config:
             severity: warn
     columns:
@@ -274,13 +252,11 @@ models:
       - elementary.volume_anomalies:
           arguments:
             timestamp_column: recorded_at
-            time_bucket: { period: hour, count: 1 }
           config:
             severity: warn
       - elementary.freshness_anomalies:
           arguments:
             timestamp_column: recorded_at
-            time_bucket: { period: hour, count: 1 }
           config:
             severity: warn
     columns:
