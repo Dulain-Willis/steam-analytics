@@ -1,5 +1,19 @@
 # macros
 
+## `incremental_lookback_filter`
+
+The merge-on-unique-key incremental WHERE filter shared by every
+incremental fact (#134 establishes the pattern for `fct_purchases` /
+`fct_ownership_grants`; #135/#136/#138 reuse it for the rest). Call inside
+`{% if is_incremental() %}` as `where {{ incremental_lookback_filter() }}`.
+Guards on an arrival-timestamp column (`recorded_at` by default - pass a
+different column name if a future model's arrival column is named
+differently), not an event-timestamp column, so a late-arriving or
+restated row is rescanned on the next run rather than permanently dropped.
+`var('arrival_lookback_days')` (`dbt_project.yml`) sets how many days back
+of arrival time get rescanned - see CONTEXT.md's "lookback window"
+glossary entry for why it's 14.
+
 ## `generate_schema_name`
 
 Overrides dbt's default with **env-aware** naming (dbt's
