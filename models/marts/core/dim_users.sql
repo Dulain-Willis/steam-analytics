@@ -24,7 +24,7 @@ users as (
 unknown_member as (
 
     select
-        '{{ unknown_member_user_id() }}' as user_id,
+        '{{ unknown_member() }}' as user_id,
         'Unknown member' as username,
         null as country,
         null as campaign_id,
@@ -53,7 +53,7 @@ final as (
         created_at,
         created_at::date as signup_date,
         datediff('day', created_at::date, current_date()) as tenure_days,
-        user_id = '{{ unknown_member_user_id() }}' as is_unknown_member
+        user_id = '{{ unknown_member() }}' as is_unknown_member
 
     from unioned
 

@@ -201,7 +201,7 @@ CONTEXT.md. The dbt-side terms:
   inside `dim_users.sql` itself, not a seed or a separate model - every
   consumer that already `ref()`s `dim_users` gets it for free, with no
   second place to keep in sync. The sentinel `user_id` literal lives in one
-  macro (`macros/unknown_member.sql`'s `unknown_member_user_id()`), shared
+  macro (`macros/unknown_member.sql`'s `unknown_member()`), shared
   by `dim_users` (which unions in the row) and any model that resolves
   `client_events.user_id` against it (today, `fct_product_funnel_sessions`),
   so the two can never drift apart.

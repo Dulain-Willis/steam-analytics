@@ -48,7 +48,7 @@ client_events_resolved as (
     select
         client_events.session_id,
         client_events.user_id,
-        coalesce(users.user_id, '{{ unknown_member_user_id() }}') as resolved_user_id,
+        coalesce(users.user_id, '{{ unknown_member() }}') as resolved_user_id,
         client_events.event_name,
         client_events.occurred_at
 
