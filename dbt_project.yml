@@ -12,9 +12,16 @@ profile: 'steam_analytics'
 # dim_date's active window (see CONTEXT.md). Static bounds covering the
 # synthetic data's expected range; override via --vars if the data window
 # shifts.
+#
+# arrival_lookback_days: how far back an incremental merge model rescans by
+# arrival timestamp (recorded_at) on every run, so a late-arriving or
+# restated row still lands within the window that re-included it. See
+# CONTEXT.md's "lookback window" glossary entry for why 14 and not #136's
+# 7-day arrival tail directly.
 vars:
   dim_date_start_date: '2023-01-01'
   dim_date_end_date: '2027-01-01'
+  arrival_lookback_days: 14
 
 seeds:
   steam_analytics:

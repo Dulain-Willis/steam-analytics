@@ -33,6 +33,41 @@ a synonym is listed as *avoid*, do not drift to it.
   Each `stg` model keeps the row with the highest `RECORD_METADATA:offset` per
   primary key (one partition per topic → offset is a total order).
 
+### Incremental loading
+
+- **arrival timestamp** — a row's `recorded_at` (the generator's write time,
+  carried through CDC as an ordinary column — distinct from `__source_ts_ms`,
+  the *source event time* used for freshness). An incremental model's
+  filter guards on this, never on the row's own event-time column
+  (`purchased_at`, `granted_at`, …): a late-arriving or restated row keeps
+  its original event time but gets a fresh `recorded_at` on re-arrival, so
+  filtering on event time would make the next incremental run silently skip
+  it forever. *Avoid* filtering an incremental model on anything but its
+  arrival timestamp.
+- **lookback window** — how many days back of `arrival timestamp` an
+  incremental merge model rescans on every run (`var('arrival_lookback_days')`
+  in `dbt_project.yml`, currently **14 days**), to catch a late-arriving or
+  restated row that lands after the window it would otherwise belong to.
+  Set by #134: steam-infra's late-arrival generator knob (#136) bounds its
+  backdating tail at **7 days**, so 14 was chosen as double that bound —
+  comfortably wider without being arbitrary, cheap to rescan (one window's
+  worth of rows, not the full history), and a single shared constant so
+  every incremental model in the project reprocesses the same span rather
+  than each picking its own number. Recorded here as a glossary note, not
+  an ADR, because it is reversible (a `vars` change, not a schema or
+  strategy change) and unsurprising (the standard dbt incremental-merge
+  pattern) — unlike #140/#143, which get ADRs for decisions that are
+  neither. If #136's tail bound ever changes, this number should be
+  revisited against it.
+- **incremental merge** — `materialized='incremental'` +
+  `incremental_strategy='merge'` on a `unique_key`: the warehouse default,
+  and the only strategy here that absorbs both a newly arrived row and a
+  restated historical row (matched and replaced by `unique_key`) without a
+  second mechanism for either case. Used by `fct_purchases` and
+  `fct_ownership_grants` (#134); `fct_row_counts` (Pipeline Health) already
+  used this strategy before #134 established it as the pattern for business
+  facts.
+
 ### Layers
 
 - **stg layer** — one model per landing table (`stg_steam__<entity>`). Casts,
