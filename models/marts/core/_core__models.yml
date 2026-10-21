@@ -158,7 +158,9 @@ models:
     description: >
       One row per purchase. amount_usd is derived from amount_cents via an
       FX join to the fx_rates seed. Singular tests in tests/ cover
-      amount_usd non-null / sane-ratio coverage.
+      amount_usd non-null / sane-ratio coverage, and that
+      payment_method_bucket totals reconcile to the unbucketed total
+      (#139).
     config:
       contract:
         enforced: true
@@ -209,6 +211,32 @@ models:
         data_type: float
       - name: payment_method
         data_type: varchar
+        description: >
+          No check constraint on this column (db/schema.sql) -- a new
+          value can appear without warning (#139). This test warns rather
+          than failing the build when that happens; payment_method_bucket
+          is the column consumers should actually read. The known-values
+          list here is kept in sync by hand with fct_purchases.sql's
+          bucketing CASE and payment_method_bucket's accepted_values
+          below -- all three list the same three values.
+        tests:
+          - accepted_values:
+              config:
+                severity: warn
+              arguments:
+                values: ['credit_card', 'paypal', 'steam_wallet']
+      - name: payment_method_bucket
+        data_type: varchar
+        description: >
+          payment_method collapsed to its known values, or 'unknown' for
+          anything else -- never null, so an unrecognized value can't
+          fall out of every category. Known-values list kept in sync by
+          hand with payment_method's accepted_values above.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['credit_card', 'paypal', 'steam_wallet', 'unknown']
 
   - name: fct_refunds
     description: >
@@ -574,3 +602,44 @@ seeds:
         tests: [not_null]
       - name: rate_to_usd
         tests: [not_null]
+
+unit_tests:
+  - name: test_fct_purchases_payment_method_bucket
+    description: >
+      Model-boundary unit test (#139): a payment_method value outside the
+      known set lands in the explicit 'unknown' bucket rather than null or
+      falling out entirely; a known value passes through unchanged.
+    model: fct_purchases
+    given:
+      - input: ref('int_purchases_with_fx')
+        rows:
+          - purchase_id: "p1"
+            purchase_key: "k1"
+            user_key: "u1"
+            game_key: "g1"
+            purchased_at: "2026-01-01T00:00:00"
+            purchase_date: "2026-01-01"
+            amount_cents: 1999
+            currency: "USD"
+            amount_usd: 19.99
+            payment_method: "steam_wallet"
+            is_deleted: false
+          - purchase_id: "p2"
+            purchase_key: "k2"
+            user_key: "u2"
+            game_key: "g2"
+            purchased_at: "2026-06-01T00:00:00"
+            purchase_date: "2026-06-01"
+            amount_cents: 2999
+            currency: "USD"
+            amount_usd: 29.99
+            payment_method: "crypto"
+            is_deleted: false
+    expect:
+      rows:
+        - purchase_key: "k1"
+          payment_method: "steam_wallet"
+          payment_method_bucket: "steam_wallet"
+        - purchase_key: "k2"
+          payment_method: "crypto"
+          payment_method_bucket: "unknown"
