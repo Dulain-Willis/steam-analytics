@@ -67,6 +67,17 @@ a synonym is listed as *avoid*, do not drift to it.
   `fct_ownership_grants` (#134); `fct_row_counts` (Pipeline Health) already
   used this strategy before #134 established it as the pattern for business
   facts.
+- **is_deleted on an incremental fact** — an incremental merge model carries
+  `is_deleted` through unfiltered, unlike a table-materialized mart (which
+  filters `where not is_deleted` on first consumption, CDC landing above).
+  `incremental_strategy='merge'` only upserts rows present in its own
+  select on a given run; a row that is later soft-deleted upstream simply
+  stops appearing in that select, so the merge has no way to reach its
+  already-materialized copy and flip it. Filtering `is_deleted` away before
+  the merge would make the already-landed row un-updatable, not deleted.
+  Every downstream consumer of `fct_purchases` / `fct_ownership_grants`
+  filters `where not is_deleted` itself instead (`fct_finance_revenue_daily`,
+  `fct_marketing_campaign_revenue`, `fct_product_wishlist_conversion`).
 
 ### Layers
 

@@ -70,10 +70,15 @@ models:
       amount_usd non-null / sane-ratio coverage. Incremental merge on
       purchase_key, filtered on recorded_at (arrival timestamp) with a
       lookback window (CONTEXT.md glossary) — see
-      _core__unit_tests.yml for the window's boundary proof.
+      _core__unit_tests.yml for the window's boundary proof. is_deleted is
+      carried through unfiltered (a merge can't delete a row that drops out
+      of its own select) — every downstream consumer filters
+      `where not is_deleted` itself.
     columns:
       - name: purchase_key
         tests: [unique, not_null]
+      - name: is_deleted
+        tests: [not_null]
       - name: user_key
         tests:
           - not_null
@@ -124,10 +129,15 @@ models:
       game was acquired (purchase, gift, key_redemption). Incremental merge
       on ownership_grant_key, filtered on recorded_at (arrival timestamp)
       with a lookback window (CONTEXT.md glossary) — see
-      _core__unit_tests.yml for the window's boundary proof.
+      _core__unit_tests.yml for the window's boundary proof. is_deleted is
+      carried through unfiltered (a merge can't delete a row that drops out
+      of its own select) — every downstream consumer filters
+      `where not is_deleted` itself.
     columns:
       - name: ownership_grant_key
         tests: [unique, not_null]
+      - name: is_deleted
+        tests: [not_null]
       - name: user_key
         tests:
           - not_null
