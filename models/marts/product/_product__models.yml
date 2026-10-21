@@ -7,14 +7,21 @@ models:
       active that day; wau = trailing 7-calendar-day distinct count. Global,
       no cohort split (see fct_product_session_length_daily for that).
       Singular test in tests/ covers non-negative measures and wau >= dau.
+    config:
+      contract:
+        enforced: true
     columns:
-      - name: active_users_daily_key
-        tests: [unique, not_null]
       - name: active_date
+        data_type: date
+        tests: [unique, not_null]
+      - name: active_users_daily_key
+        data_type: varchar
         tests: [unique, not_null]
       - name: dau
+        data_type: number
         tests: [not_null]
       - name: wau
+        data_type: number
         tests: [not_null]
 
   - name: fct_product_session_length_daily
@@ -25,12 +32,15 @@ models:
       and 'returning' on every later one. Open sessions are excluded - a
       session with no duration can't contribute to session length.
       Singular test in tests/ covers non-negative measures.
+    config:
+      contract:
+        enforced: true
     columns:
-      - name: session_length_daily_key
-        tests: [unique, not_null]
       - name: started_date
+        data_type: date
         tests: [not_null]
       - name: game_key
+        data_type: varchar
         tests:
           - not_null
           - relationships:
@@ -38,11 +48,23 @@ models:
                 to: ref('dim_games')
                 field: game_key
       - name: user_cohort
+        data_type: varchar
         tests:
           - not_null
           - accepted_values:
               arguments:
                 values: ['new', 'returning']
+      - name: session_length_daily_key
+        data_type: varchar
+        tests: [unique, not_null]
+      - name: session_count
+        data_type: number
+      - name: avg_duration_minutes
+        data_type: float
+      - name: p50_duration_minutes
+        data_type: float
+      - name: p90_duration_minutes
+        data_type: float
 
   - name: fct_product_wishlist_conversion
     description: >
@@ -53,10 +75,12 @@ models:
       the earliest such grant, over converted rows only. Singular tests in
       tests/ cover non-negative measures and independently re-derive the
       conversion logic from the core facts.
+    config:
+      contract:
+        enforced: true
     columns:
-      - name: wishlist_conversion_key
-        tests: [unique, not_null]
       - name: game_key
+        data_type: varchar
         tests:
           - unique
           - not_null
@@ -64,12 +88,20 @@ models:
               arguments:
                 to: ref('dim_games')
                 field: game_key
+      - name: wishlist_conversion_key
+        data_type: varchar
+        tests: [unique, not_null]
       - name: wishlist_add_count
+        data_type: number
         tests: [not_null]
       - name: converted_count
+        data_type: number
         tests: [not_null]
       - name: conversion_rate
+        data_type: float
         tests: [not_null]
+      - name: median_days_to_convert
+        data_type: float
 
   - name: fct_product_funnel_sessions
     description: >
@@ -83,19 +115,47 @@ models:
       purchase_complete is a marker only - amount / grant detail comes from
       fct_ownership_grants. Singular test in tests/ covers stage timestamps
       being non-decreasing within a session.
+    config:
+      contract:
+        enforced: true
     columns:
-      - name: funnel_session_key
-        tests: [unique, not_null]
       - name: session_id
+        data_type: varchar
         tests: [unique, not_null]
       - name: user_id
+        data_type: varchar
         tests:
           - not_null
           - relationships:
               arguments:
                 to: ref('dim_users')
                 field: user_id
+      - name: funnel_session_key
+        data_type: varchar
+        tests: [unique, not_null]
       - name: session_date
+        data_type: date
         tests: [not_null]
       - name: session_started_at
+        data_type: timestamp_tz
         tests: [not_null]
+      - name: store_page_view_at
+        data_type: timestamp_tz
+      - name: game_page_view_at
+        data_type: timestamp_tz
+      - name: add_to_wishlist_at
+        data_type: timestamp_tz
+      - name: begin_checkout_at
+        data_type: timestamp_tz
+      - name: purchase_complete_at
+        data_type: timestamp_tz
+      - name: has_reached_store_page_view
+        data_type: boolean
+      - name: has_reached_game_page_view
+        data_type: boolean
+      - name: has_reached_add_to_wishlist
+        data_type: boolean
+      - name: has_reached_begin_checkout
+        data_type: boolean
+      - name: has_reached_purchase_complete
+        data_type: boolean

@@ -68,6 +68,38 @@ a synonym is listed as *avoid*, do not drift to it.
   `elementary` package. Lives in `marts/core`, owned by Central Data Eng — not
   a spoke.
 
+### Schema evolution & contracts
+
+- **schema evolution** — a shape change made directly against a
+  `steam-infra` source table (an `alter table`), outside any coordinated
+  release. *Additive* evolution (a new nullable column — see
+  `steam-infra`'s `scenarios/games_add_column.py`, #144) needs no
+  coordinated release at all: Snowflake's schema-evolution feature
+  (`snowflake.enable.schematization=true`, [ADR 0001](docs/adr/0001-cdc-landing-shape.md))
+  adds the matching column to the landing table automatically on the
+  connector's next change event, and every `stg` model keeps building
+  unchanged because its final `select` already names its output columns
+  explicitly rather than `select *`-ing the landing table. A *breaking*
+  evolution (a rename, a type change, a drop) is a deliberate follow-up,
+  out of scope for #144 — that's exactly the case a **contract** (below)
+  is built to catch.
+- **contract** — a declared, enforced shape on a **published** model's
+  output: `config: {contract: {enforced: true}}` plus a `data_type` on
+  every column in that model's schema yml. *Published* here means every
+  model in `models/marts/{core,product,marketing,finance}` **except**
+  Pipeline Health (`fct_dbt_test_results`, `fct_source_freshness`,
+  `fct_row_counts`) — Pipeline Health is internal observability fed by
+  the vendored `elementary` package rather than a business-owned shape,
+  and contracting it would pin this project to elementary's own upstream
+  schema. A contracted model whose SQL stops producing a declared column,
+  or changes one's type, fails the build (`dbt build`/`dbt run` raises a
+  contract error) instead of silently reshaping a table a spoke team or
+  BI tool depends on. A contract only constrains the columns a model
+  actually declares — an additive upstream column that a model never
+  selects never trips it, which is why schema evolution and contracts are
+  complementary, not redundant: one lets harmless change through
+  silently, the other stops harmful change loudly.
+
 ### Environments
 
 Environments (**dev**, **staging**, **prod**) are defined in `steam-infra`'s
