@@ -34,6 +34,9 @@ final as (
         amount_usd,
         payment_method,
 
+        -- Known values kept in sync with payment_method's and
+        -- payment_method_bucket's accepted_values tests in
+        -- _core__models.yml -- all three list the same three values.
         case
             when payment_method in ('credit_card', 'paypal', 'steam_wallet') then payment_method
             else 'unknown'

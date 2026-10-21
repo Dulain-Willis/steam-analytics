@@ -107,7 +107,10 @@ models:
           No check constraint on this column (db/schema.sql) -- a new
           value can appear without warning (#139). This test warns rather
           than failing the build when that happens; payment_method_bucket
-          is the column consumers should actually read.
+          is the column consumers should actually read. The known-values
+          list here is kept in sync by hand with fct_purchases.sql's
+          bucketing CASE and payment_method_bucket's accepted_values
+          below -- all three list the same three values.
         tests:
           - accepted_values:
               config:
@@ -118,7 +121,8 @@ models:
         description: >
           payment_method collapsed to its known values, or 'unknown' for
           anything else -- never null, so an unrecognized value can't
-          fall out of every category.
+          fall out of every category. Known-values list kept in sync by
+          hand with payment_method's accepted_values above.
         tests:
           - not_null
           - accepted_values:
