@@ -68,6 +68,10 @@ models:
       One row per purchase. amount_usd is derived from amount_cents via an
       FX join to the fx_rates seed. Singular tests in tests/ cover
       amount_usd non-null / sane-ratio coverage.
+    # Volume/freshness anomaly detection on purchased_at: this mart has no
+    # recorded_at of its own, so these watch business-event volume/recency
+    # directly - a layer dbt's native source freshness cannot reach, since
+    # it only runs against declared source()s (see CONTEXT.md).
     tests:
       # #133: purchase_key is unique by construction (derived from
       # purchase_id), which would stay green even if two distinct
@@ -77,6 +81,16 @@ models:
       - dbt_utils.unique_combination_of_columns:
           arguments:
             combination_of_columns: [user_key, game_key, purchased_at]
+      - elementary.volume_anomalies:
+          arguments:
+            timestamp_column: purchased_at
+          config:
+            severity: warn
+      - elementary.freshness_anomalies:
+          arguments:
+            timestamp_column: purchased_at
+          config:
+            severity: warn
     columns:
       - name: purchase_key
         tests: [unique, not_null]
@@ -99,6 +113,17 @@ models:
     description: >
       One row per refund, valued from its linked purchase. Singular test in
       tests/ covers refunded_at >= the linked purchase's purchased_at.
+    tests:
+      - elementary.volume_anomalies:
+          arguments:
+            timestamp_column: refunded_at
+          config:
+            severity: warn
+      - elementary.freshness_anomalies:
+          arguments:
+            timestamp_column: refunded_at
+          config:
+            severity: warn
     columns:
       - name: refund_key
         tests: [unique, not_null]
@@ -128,6 +153,17 @@ models:
     description: >
       One row per grant of a game to a user. source distinguishes how the
       game was acquired (purchase, gift, key_redemption).
+    tests:
+      - elementary.volume_anomalies:
+          arguments:
+            timestamp_column: granted_at
+          config:
+            severity: warn
+      - elementary.freshness_anomalies:
+          arguments:
+            timestamp_column: granted_at
+          config:
+            severity: warn
     columns:
       - name: ownership_grant_key
         tests: [unique, not_null]
@@ -155,6 +191,17 @@ models:
     description: >
       One row per gameplay session. Open sessions (no ended_at) carry
       is_open = true and a null duration_minutes.
+    tests:
+      - elementary.volume_anomalies:
+          arguments:
+            timestamp_column: started_at
+          config:
+            severity: warn
+      - elementary.freshness_anomalies:
+          arguments:
+            timestamp_column: started_at
+          config:
+            severity: warn
     columns:
       - name: playtime_session_key
         tests: [unique, not_null]
@@ -177,6 +224,17 @@ models:
 
   - name: fct_concurrent_player_snapshots
     description: One row per game x concurrent-player snapshot.
+    tests:
+      - elementary.volume_anomalies:
+          arguments:
+            timestamp_column: snapshot_at
+          config:
+            severity: warn
+      - elementary.freshness_anomalies:
+          arguments:
+            timestamp_column: snapshot_at
+          config:
+            severity: warn
     columns:
       - name: concurrent_player_snapshot_key
         tests: [unique, not_null]
@@ -192,6 +250,17 @@ models:
     description: >
       One row per wishlist add. removed_at is null while the item is still
       wishlisted. Singular test in tests/ covers removed_at >= added_at.
+    tests:
+      - elementary.volume_anomalies:
+          arguments:
+            timestamp_column: added_at
+          config:
+            severity: warn
+      - elementary.freshness_anomalies:
+          arguments:
+            timestamp_column: added_at
+          config:
+            severity: warn
     columns:
       - name: wishlist_item_key
         tests: [unique, not_null]

@@ -24,6 +24,7 @@ select
     country,
     campaign_id,
     created_at::timestamp_tz as created_at,
+    deletion_requested_at::timestamp_tz as deletion_requested_at,
     coalesce(__deleted, false) as is_deleted
 
 from source

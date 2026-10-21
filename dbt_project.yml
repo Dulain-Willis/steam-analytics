@@ -15,6 +15,17 @@ profile: 'steam_analytics'
 vars:
   dim_date_start_date: '2023-01-01'
   dim_date_end_date: '2027-01-01'
+  # Project-wide default time_bucket for every elementary volume_anomalies /
+  # freshness_anomalies test (steam-infra #145). Every one of those tests
+  # omits its own time_bucket argument on purpose, relying on elementary's
+  # argument-then-var fallback (get_test_argument) to pick this up - hourly
+  # buckets, so a baseline accumulates in hours of generator traffic rather
+  # than days. One place to change the granularity for all ~40 tests at
+  # once instead of editing each test's yml. (severity has no such project-
+  # level fallback - elementary's test config scoping doesn't route through
+  # package-scoped dbt_project.yml test config, confirmed empirically - so
+  # severity: warn stays explicit on every test.)
+  time_bucket: { period: hour, count: 1 }
 
 seeds:
   steam_analytics:
