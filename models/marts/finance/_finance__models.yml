@@ -8,23 +8,47 @@ models:
       Country is null until the users.country infra ticket lands (soft
       block, CONTEXT.md). Singular tests in tests/ cover non-negative
       measures and that refunds deduct by refund_date, not purchase_date.
+    config:
+      contract:
+        enforced: true
     columns:
-      - name: finance_revenue_daily_key
-        tests: [unique, not_null]
       - name: revenue_date
+        data_type: date
         tests: [not_null]
+      - name: country
+        data_type: varchar
       - name: is_chargeback
+        data_type: boolean
         tests: [not_null]
+      - name: finance_revenue_daily_key
+        data_type: varchar
+        tests: [unique, not_null]
+      - name: revenue_cents
+        data_type: number
+      - name: refunded_cents
+        data_type: number
+      - name: purchase_count
+        data_type: number
+      - name: refund_count
+        data_type: number
+      - name: chargeback_count
+        data_type: number
 
   - name: fct_finance_capacity_daily
     description: >
       One row per date. peak_concurrent_players is the daily max of
       platform-wide concurrent players (summed across games per snapshot).
       Singular test in tests/ covers non-negative measures.
+    config:
+      contract:
+        enforced: true
     columns:
-      - name: finance_capacity_daily_key
-        tests: [unique, not_null]
       - name: capacity_date
+        data_type: date
+        tests: [unique, not_null]
+      - name: finance_capacity_daily_key
+        data_type: varchar
         tests: [unique, not_null]
       - name: peak_concurrent_players
+        data_type: number
         tests: [not_null]

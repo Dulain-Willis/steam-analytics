@@ -3,12 +3,22 @@ version: 2
 models:
   - name: dim_users
     description: One row per user. Type 1, latest attributes only.
+    config:
+      contract:
+        enforced: true
     columns:
       - name: user_key
+        data_type: varchar
         tests: [unique, not_null]
       - name: user_id
+        data_type: varchar
         tests: [unique, not_null]
+      - name: username
+        data_type: varchar
+      - name: country
+        data_type: varchar
       - name: campaign_id
+        data_type: varchar
         description: >
           Immutable first-touch attribution, set once at signup. NULL =
           organic/direct (CONTEXT.md) - never a fake "organic" campaign row.
@@ -17,15 +27,29 @@ models:
               arguments:
                 to: ref('dim_marketing_campaigns')
                 field: marketing_campaign_id
+      - name: created_at
+        data_type: timestamp_tz
+      - name: signup_date
+        data_type: date
+      - name: tenure_days
+        data_type: number
 
   - name: dim_marketing_campaigns
     description: One row per marketing campaign. Type 1, latest attributes only.
+    config:
+      contract:
+        enforced: true
     columns:
       - name: marketing_campaign_key
+        data_type: varchar
         tests: [unique, not_null]
       - name: marketing_campaign_id
+        data_type: varchar
         tests: [unique, not_null]
+      - name: name
+        data_type: varchar
       - name: channel
+        data_type: varchar
         tests:
           - not_null
           - accepted_values:
@@ -38,20 +62,69 @@ models:
                     'influencer',
                     'affiliate',
                   ]
+      - name: spend_cents
+        data_type: number
+      - name: currency
+        data_type: varchar
+      - name: starts_at
+        data_type: timestamp_tz
+      - name: ends_at
+        data_type: timestamp_tz
+      - name: created_at
+        data_type: timestamp_tz
 
   - name: dim_games
     description: One row per game. Type 1, latest attributes only.
+    config:
+      contract:
+        enforced: true
     columns:
       - name: game_key
+        data_type: varchar
         tests: [unique, not_null]
       - name: game_id
+        data_type: varchar
         tests: [unique, not_null]
+      - name: name
+        data_type: varchar
+      - name: developer
+        data_type: varchar
+      - name: publisher
+        data_type: varchar
+      - name: genres
+        data_type: array
+      - name: languages
+        data_type: array
+      - name: tags
+        data_type: variant
+      - name: created_at
+        data_type: timestamp_tz
 
   - name: dim_date
     description: Date spine over the project's active window (CONTEXT.md).
+    config:
+      contract:
+        enforced: true
     columns:
       - name: date_day
+        data_type: date
         tests: [unique, not_null]
+      - name: year
+        data_type: number
+      - name: quarter
+        data_type: number
+      - name: month
+        data_type: number
+      - name: day_of_month
+        data_type: number
+      - name: day_of_week
+        data_type: number
+      - name: day_name
+        data_type: varchar
+      - name: week_of_year
+        data_type: number
+      - name: is_weekend
+        data_type: boolean
 
   - name: dim_game_prices
     description: >
@@ -59,19 +132,57 @@ models:
       from the price_changes event log (see int_game_prices_replayed).
       Singular tests in tests/ cover non-overlap, gap-free coverage, and
       exactly-one-current-row per game_id x region.
+    config:
+      contract:
+        enforced: true
     columns:
       - name: game_price_key
+        data_type: varchar
         tests: [unique, not_null]
+      - name: game_id
+        data_type: varchar
+      - name: region
+        data_type: varchar
+      - name: currency
+        data_type: varchar
+      - name: price_cents
+        data_type: number
+      - name: valid_from
+        data_type: timestamp_tz
+      - name: valid_to
+        data_type: timestamp_tz
+      - name: is_current
+        data_type: boolean
 
   - name: fct_purchases
     description: >
       One row per purchase. amount_usd is derived from amount_cents via an
       FX join to the fx_rates seed. Singular tests in tests/ cover
       amount_usd non-null / sane-ratio coverage.
+    config:
+      contract:
+        enforced: true
+    # Volume/freshness anomaly detection on purchased_at: this mart has no
+    # recorded_at of its own, so these watch business-event volume/recency
+    # directly - a layer dbt's native source freshness cannot reach, since
+    # it only runs against declared source()s (see CONTEXT.md).
+    tests:
+      - elementary.volume_anomalies:
+          arguments:
+            timestamp_column: purchased_at
+          config:
+            severity: warn
+      - elementary.freshness_anomalies:
+          arguments:
+            timestamp_column: purchased_at
+          config:
+            severity: warn
     columns:
       - name: purchase_key
+        data_type: varchar
         tests: [unique, not_null]
       - name: user_key
+        data_type: varchar
         tests:
           - not_null
           - relationships:
@@ -79,21 +190,50 @@ models:
                 to: ref('dim_users')
                 field: user_key
       - name: game_key
+        data_type: varchar
         tests:
           - not_null
           - relationships:
               arguments:
                 to: ref('dim_games')
                 field: game_key
+      - name: purchased_at
+        data_type: timestamp_tz
+      - name: purchase_date
+        data_type: date
+      - name: amount_cents
+        data_type: number
+      - name: currency
+        data_type: varchar
+      - name: amount_usd
+        data_type: float
+      - name: payment_method
+        data_type: varchar
 
   - name: fct_refunds
     description: >
       One row per refund, valued from its linked purchase. Singular test in
       tests/ covers refunded_at >= the linked purchase's purchased_at.
+    config:
+      contract:
+        enforced: true
+    tests:
+      - elementary.volume_anomalies:
+          arguments:
+            timestamp_column: refunded_at
+          config:
+            severity: warn
+      - elementary.freshness_anomalies:
+          arguments:
+            timestamp_column: refunded_at
+          config:
+            severity: warn
     columns:
       - name: refund_key
+        data_type: varchar
         tests: [unique, not_null]
       - name: purchase_key
+        data_type: varchar
         tests:
           - not_null
           - relationships:
@@ -101,6 +241,7 @@ models:
                 to: ref('fct_purchases')
                 field: purchase_key
       - name: user_key
+        data_type: varchar
         tests:
           - not_null
           - relationships:
@@ -108,21 +249,46 @@ models:
                 to: ref('dim_users')
                 field: user_key
       - name: game_key
+        data_type: varchar
         tests:
           - not_null
           - relationships:
               arguments:
                 to: ref('dim_games')
                 field: game_key
+      - name: refunded_at
+        data_type: timestamp_tz
+      - name: refund_date
+        data_type: date
+      - name: is_chargeback
+        data_type: boolean
+      - name: refunded_amount_usd
+        data_type: float
 
   - name: fct_ownership_grants
     description: >
       One row per grant of a game to a user. source distinguishes how the
       game was acquired (purchase, gift, key_redemption).
+    config:
+      contract:
+        enforced: true
+    tests:
+      - elementary.volume_anomalies:
+          arguments:
+            timestamp_column: granted_at
+          config:
+            severity: warn
+      - elementary.freshness_anomalies:
+          arguments:
+            timestamp_column: granted_at
+          config:
+            severity: warn
     columns:
       - name: ownership_grant_key
+        data_type: varchar
         tests: [unique, not_null]
       - name: user_key
+        data_type: varchar
         tests:
           - not_null
           - relationships:
@@ -130,6 +296,7 @@ models:
                 to: ref('dim_users')
                 field: user_key
       - name: game_key
+        data_type: varchar
         tests:
           - not_null
           - relationships:
@@ -137,19 +304,40 @@ models:
                 to: ref('dim_games')
                 field: game_key
       - name: source
+        data_type: varchar
         tests:
           - accepted_values:
               arguments:
                 values: ['purchase', 'gift', 'key_redemption']
+      - name: granted_at
+        data_type: timestamp_tz
+      - name: revoked_at
+        data_type: timestamp_tz
 
   - name: fct_playtime_sessions
     description: >
       One row per gameplay session. Open sessions (no ended_at) carry
       is_open = true and a null duration_minutes.
+    config:
+      contract:
+        enforced: true
+    tests:
+      - elementary.volume_anomalies:
+          arguments:
+            timestamp_column: started_at
+          config:
+            severity: warn
+      - elementary.freshness_anomalies:
+          arguments:
+            timestamp_column: started_at
+          config:
+            severity: warn
     columns:
       - name: playtime_session_key
+        data_type: varchar
         tests: [unique, not_null]
       - name: user_key
+        data_type: varchar
         tests:
           - not_null
           - relationships:
@@ -157,36 +345,82 @@ models:
                 to: ref('dim_users')
                 field: user_key
       - name: game_key
+        data_type: varchar
         tests:
           - not_null
           - relationships:
               arguments:
                 to: ref('dim_games')
                 field: game_key
+      - name: started_at
+        data_type: timestamp_tz
+      - name: started_date
+        data_type: date
       - name: is_open
+        data_type: boolean
         tests: [not_null]
+      - name: duration_minutes
+        data_type: number
 
   - name: fct_concurrent_player_snapshots
     description: One row per game x concurrent-player snapshot.
+    config:
+      contract:
+        enforced: true
+    tests:
+      - elementary.volume_anomalies:
+          arguments:
+            timestamp_column: snapshot_at
+          config:
+            severity: warn
+      - elementary.freshness_anomalies:
+          arguments:
+            timestamp_column: snapshot_at
+          config:
+            severity: warn
     columns:
       - name: concurrent_player_snapshot_key
+        data_type: varchar
         tests: [unique, not_null]
       - name: game_key
+        data_type: varchar
         tests:
           - not_null
           - relationships:
               arguments:
                 to: ref('dim_games')
                 field: game_key
+      - name: player_count
+        data_type: number
+      - name: snapshot_at
+        data_type: timestamp_tz
+      - name: snapshot_date
+        data_type: date
 
   - name: fct_wishlist_items
     description: >
       One row per wishlist add. removed_at is null while the item is still
       wishlisted. Singular test in tests/ covers removed_at >= added_at.
+    config:
+      contract:
+        enforced: true
+    tests:
+      - elementary.volume_anomalies:
+          arguments:
+            timestamp_column: added_at
+          config:
+            severity: warn
+      - elementary.freshness_anomalies:
+          arguments:
+            timestamp_column: added_at
+          config:
+            severity: warn
     columns:
       - name: wishlist_item_key
+        data_type: varchar
         tests: [unique, not_null]
       - name: user_key
+        data_type: varchar
         tests:
           - not_null
           - relationships:
@@ -194,13 +428,27 @@ models:
                 to: ref('dim_users')
                 field: user_key
       - name: game_key
+        data_type: varchar
         tests:
           - not_null
           - relationships:
               arguments:
                 to: ref('dim_games')
                 field: game_key
+      - name: added_at
+        data_type: timestamp_tz
+      - name: added_date
+        data_type: date
+      - name: removed_at
+        data_type: timestamp_tz
 
+  # Pipeline Health (fct_dbt_test_results, fct_source_freshness,
+  # fct_row_counts below) is deliberately NOT contracted. These are
+  # internal observability facts fed by the vendored elementary package
+  # (CONTEXT.md), not a business-owned shape a spoke team or external BI
+  # tool depends on - and contracting them would pin this project to
+  # elementary's own upstream schema, which this project does not control.
+  # See #144's written record for the full "published" definition.
   - name: fct_dbt_test_results
     description: >
       One row per dbt schema x day. Daily test pass rate (pass_count /
