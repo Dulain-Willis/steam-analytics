@@ -593,25 +593,6 @@ unit_tests:
           is_open: false
           duration_minutes: 60
 
-seeds:
-  - name: fx_rates
-    description: >
-      Synthetic daily FX rates (rate_to_usd) for USD/EUR/GBP/BRL/JPY over
-      the project's active window. USD rows are always 1.0. The only
-      reference-data seed in the project.
-    tests:
-      - dbt_utils.unique_combination_of_columns:
-          arguments:
-            combination_of_columns: [date, currency]
-    columns:
-      - name: date
-        tests: [not_null]
-      - name: currency
-        tests: [not_null]
-      - name: rate_to_usd
-        tests: [not_null]
-
-unit_tests:
   - name: test_fct_purchases_payment_method_bucket
     description: >
       Model-boundary unit test (#139): a payment_method value outside the
@@ -651,3 +632,21 @@ unit_tests:
         - purchase_key: "k2"
           payment_method: "crypto"
           payment_method_bucket: "unknown"
+
+seeds:
+  - name: fx_rates
+    description: >
+      Synthetic daily FX rates (rate_to_usd) for USD/EUR/GBP/BRL/JPY over
+      the project's active window. USD rows are always 1.0. The only
+      reference-data seed in the project.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [date, currency]
+    columns:
+      - name: date
+        tests: [not_null]
+      - name: currency
+        tests: [not_null]
+      - name: rate_to_usd
+        tests: [not_null]
