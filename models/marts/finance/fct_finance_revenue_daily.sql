@@ -20,6 +20,8 @@ purchases as (
 
     from {{ ref('fct_purchases') }}
 
+    where not is_deleted
+
 ),
 
 refunds as (

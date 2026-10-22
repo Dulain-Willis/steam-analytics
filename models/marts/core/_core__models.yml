@@ -2,13 +2,28 @@ version: 2
 
 models:
   - name: dim_users
-    description: One row per user. Type 1, latest attributes only.
+    description: >
+      One row per user. Type 1, latest attributes only. Plus exactly one
+      sentinel row (user_id = 'unknown_member', is_unknown_member = true)
+      that an orphan client_events.user_id resolves to (steam-infra #141) -
+      distinct from the campaign_id null-means-organic convention below, no
+      fake campaign row is introduced for that case.
+    config:
+      contract:
+        enforced: true
     columns:
       - name: user_key
+        data_type: varchar
         tests: [unique, not_null]
       - name: user_id
+        data_type: varchar
         tests: [unique, not_null]
+      - name: username
+        data_type: varchar
+      - name: country
+        data_type: varchar
       - name: campaign_id
+        data_type: varchar
         description: >
           Immutable first-touch attribution, set once at signup. NULL =
           organic/direct (CONTEXT.md) - never a fake "organic" campaign row.
@@ -17,15 +32,32 @@ models:
               arguments:
                 to: ref('dim_marketing_campaigns')
                 field: marketing_campaign_id
+      - name: created_at
+        data_type: timestamp_tz
+      - name: signup_date
+        data_type: date
+      - name: tenure_days
+        data_type: number
+      - name: is_unknown_member
+        data_type: boolean
+        tests: [not_null]
 
   - name: dim_marketing_campaigns
     description: One row per marketing campaign. Type 1, latest attributes only.
+    config:
+      contract:
+        enforced: true
     columns:
       - name: marketing_campaign_key
+        data_type: varchar
         tests: [unique, not_null]
       - name: marketing_campaign_id
+        data_type: varchar
         tests: [unique, not_null]
+      - name: name
+        data_type: varchar
       - name: channel
+        data_type: varchar
         tests:
           - not_null
           - accepted_values:
@@ -38,20 +70,69 @@ models:
                     'influencer',
                     'affiliate',
                   ]
+      - name: spend_cents
+        data_type: number
+      - name: currency
+        data_type: varchar
+      - name: starts_at
+        data_type: timestamp_tz
+      - name: ends_at
+        data_type: timestamp_tz
+      - name: created_at
+        data_type: timestamp_tz
 
   - name: dim_games
     description: One row per game. Type 1, latest attributes only.
+    config:
+      contract:
+        enforced: true
     columns:
       - name: game_key
+        data_type: varchar
         tests: [unique, not_null]
       - name: game_id
+        data_type: varchar
         tests: [unique, not_null]
+      - name: name
+        data_type: varchar
+      - name: developer
+        data_type: varchar
+      - name: publisher
+        data_type: varchar
+      - name: genres
+        data_type: array
+      - name: languages
+        data_type: array
+      - name: tags
+        data_type: variant
+      - name: created_at
+        data_type: timestamp_tz
 
   - name: dim_date
     description: Date spine over the project's active window (CONTEXT.md).
+    config:
+      contract:
+        enforced: true
     columns:
       - name: date_day
+        data_type: date
         tests: [unique, not_null]
+      - name: year
+        data_type: number
+      - name: quarter
+        data_type: number
+      - name: month
+        data_type: number
+      - name: day_of_month
+        data_type: number
+      - name: day_of_week
+        data_type: number
+      - name: day_name
+        data_type: varchar
+      - name: week_of_year
+        data_type: number
+      - name: is_weekend
+        data_type: boolean
 
   - name: dim_game_prices
     description: >
@@ -59,41 +140,151 @@ models:
       from the price_changes event log (see int_game_prices_replayed).
       Singular tests in tests/ cover non-overlap, gap-free coverage, and
       exactly-one-current-row per game_id x region.
+    config:
+      contract:
+        enforced: true
     columns:
       - name: game_price_key
+        data_type: varchar
         tests: [unique, not_null]
+      - name: game_id
+        data_type: varchar
+      - name: region
+        data_type: varchar
+      - name: currency
+        data_type: varchar
+      - name: price_cents
+        data_type: number
+      - name: valid_from
+        data_type: timestamp_tz
+      - name: valid_to
+        data_type: timestamp_tz
+      - name: is_current
+        data_type: boolean
 
   - name: fct_purchases
     description: >
       One row per purchase. amount_usd is derived from amount_cents via an
       FX join to the fx_rates seed. Singular tests in tests/ cover
-      amount_usd non-null / sane-ratio coverage.
+      amount_usd non-null / sane-ratio coverage, and that
+      payment_method_bucket totals reconcile to the unbucketed total
+      (#139). Incremental merge on purchase_key, filtered on recorded_at
+      (arrival timestamp) with a lookback window (CONTEXT.md glossary) —
+      see _core__unit_tests.yml for the window's boundary proof. is_deleted
+      is carried through unfiltered (a merge can't delete a row that drops
+      out of its own select) — every downstream consumer filters
+      `where not is_deleted` itself.
+    config:
+      contract:
+        enforced: true
+    # Volume/freshness anomaly detection on purchased_at (the business-event
+    # time, not recorded_at the arrival timestamp #134 added): watches
+    # business-event volume/recency directly - a layer dbt's native source
+    # freshness cannot reach, since it only runs against declared
+    # source()s (see CONTEXT.md).
+    tests:
+      - elementary.volume_anomalies:
+          arguments:
+            timestamp_column: purchased_at
+          config:
+            severity: warn
+      - elementary.freshness_anomalies:
+          arguments:
+            timestamp_column: purchased_at
+          config:
+            severity: warn
     columns:
       - name: purchase_key
+        data_type: varchar
         tests: [unique, not_null]
+      - name: is_deleted
+        data_type: boolean
+        tests: [not_null]
       - name: user_key
+        data_type: varchar
         tests:
           - not_null
           - relationships:
+              config:
+                where: "not is_deleted"
               arguments:
                 to: ref('dim_users')
                 field: user_key
       - name: game_key
+        data_type: varchar
         tests:
           - not_null
           - relationships:
+              config:
+                where: "not is_deleted"
               arguments:
                 to: ref('dim_games')
                 field: game_key
+      - name: purchased_at
+        data_type: timestamp_tz
+      - name: purchase_date
+        data_type: date
+      - name: recorded_at
+        data_type: timestamp_tz
+      - name: amount_cents
+        data_type: number
+      - name: currency
+        data_type: varchar
+      - name: amount_usd
+        data_type: float
+      - name: payment_method
+        data_type: varchar
+        description: >
+          No check constraint on this column (db/schema.sql) -- a new
+          value can appear without warning (#139). This test warns rather
+          than failing the build when that happens; payment_method_bucket
+          is the column consumers should actually read. The known-values
+          list here is kept in sync by hand with fct_purchases.sql's
+          bucketing CASE and payment_method_bucket's accepted_values
+          below -- all three list the same three values.
+        tests:
+          - accepted_values:
+              config:
+                severity: warn
+              arguments:
+                values: ['credit_card', 'paypal', 'steam_wallet']
+      - name: payment_method_bucket
+        data_type: varchar
+        description: >
+          payment_method collapsed to its known values, or 'unknown' for
+          anything else -- never null, so an unrecognized value can't
+          fall out of every category. Known-values list kept in sync by
+          hand with payment_method's accepted_values above.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['credit_card', 'paypal', 'steam_wallet', 'unknown']
 
   - name: fct_refunds
     description: >
       One row per refund, valued from its linked purchase. Singular test in
       tests/ covers refunded_at >= the linked purchase's purchased_at.
+    config:
+      contract:
+        enforced: true
+    tests:
+      - elementary.volume_anomalies:
+          arguments:
+            timestamp_column: refunded_at
+          config:
+            severity: warn
+      - elementary.freshness_anomalies:
+          arguments:
+            timestamp_column: refunded_at
+          config:
+            severity: warn
     columns:
       - name: refund_key
+        data_type: varchar
         tests: [unique, not_null]
       - name: purchase_key
+        data_type: varchar
         tests:
           - not_null
           - relationships:
@@ -101,6 +292,7 @@ models:
                 to: ref('fct_purchases')
                 field: purchase_key
       - name: user_key
+        data_type: varchar
         tests:
           - not_null
           - relationships:
@@ -108,85 +300,220 @@ models:
                 to: ref('dim_users')
                 field: user_key
       - name: game_key
+        data_type: varchar
         tests:
           - not_null
           - relationships:
               arguments:
                 to: ref('dim_games')
                 field: game_key
+      - name: refunded_at
+        data_type: timestamp_tz
+      - name: refund_date
+        data_type: date
+      - name: is_chargeback
+        data_type: boolean
+      - name: refunded_amount_usd
+        data_type: float
 
   - name: fct_ownership_grants
     description: >
       One row per grant of a game to a user. source distinguishes how the
-      game was acquired (purchase, gift, key_redemption).
+      game was acquired (purchase, gift, key_redemption). Incremental merge
+      on ownership_grant_key, filtered on recorded_at (arrival timestamp)
+      with a lookback window (CONTEXT.md glossary) — see
+      _core__unit_tests.yml for the window's boundary proof. is_deleted is
+      carried through unfiltered (a merge can't delete a row that drops out
+      of its own select) — every downstream consumer filters
+      `where not is_deleted` itself.
+    config:
+      contract:
+        enforced: true
+    tests:
+      - elementary.volume_anomalies:
+          arguments:
+            timestamp_column: granted_at
+          config:
+            severity: warn
+      - elementary.freshness_anomalies:
+          arguments:
+            timestamp_column: granted_at
+          config:
+            severity: warn
     columns:
       - name: ownership_grant_key
+        data_type: varchar
         tests: [unique, not_null]
+      - name: is_deleted
+        data_type: boolean
+        tests: [not_null]
       - name: user_key
+        data_type: varchar
         tests:
           - not_null
           - relationships:
+              config:
+                where: "not is_deleted"
               arguments:
                 to: ref('dim_users')
                 field: user_key
       - name: game_key
+        data_type: varchar
         tests:
           - not_null
           - relationships:
+              config:
+                where: "not is_deleted"
               arguments:
                 to: ref('dim_games')
                 field: game_key
       - name: source
+        data_type: varchar
         tests:
           - accepted_values:
               arguments:
                 values: ['purchase', 'gift', 'key_redemption']
+      - name: granted_at
+        data_type: timestamp_tz
+      - name: revoked_at
+        data_type: timestamp_tz
+      - name: recorded_at
+        data_type: timestamp_tz
 
   - name: fct_playtime_sessions
     description: >
       One row per gameplay session. Open sessions (no ended_at) carry
-      is_open = true and a null duration_minutes.
+      is_open = true and a null duration_minutes. Incremental merge on
+      playtime_session_key, filtered on recorded_at (arrival timestamp)
+      with a lookback window (CONTEXT.md glossary). is_deleted is carried
+      through unfiltered (a merge can't delete a row that drops out of its
+      own select) — every downstream consumer filters
+      `where not is_deleted` itself.
+    config:
+      contract:
+        enforced: true
+    tests:
+      - elementary.volume_anomalies:
+          arguments:
+            timestamp_column: started_at
+          config:
+            severity: warn
+      - elementary.freshness_anomalies:
+          arguments:
+            timestamp_column: started_at
+          config:
+            severity: warn
     columns:
       - name: playtime_session_key
+        data_type: varchar
         tests: [unique, not_null]
+      - name: is_deleted
+        data_type: boolean
+        tests: [not_null]
       - name: user_key
+        data_type: varchar
         tests:
           - not_null
           - relationships:
+              config:
+                where: "not is_deleted"
               arguments:
                 to: ref('dim_users')
                 field: user_key
       - name: game_key
+        data_type: varchar
         tests:
           - not_null
           - relationships:
+              config:
+                where: "not is_deleted"
               arguments:
                 to: ref('dim_games')
                 field: game_key
+      - name: started_at
+        data_type: timestamp_tz
+      - name: started_date
+        data_type: date
+      - name: recorded_at
+        data_type: timestamp_tz
       - name: is_open
+        data_type: boolean
         tests: [not_null]
+      - name: duration_minutes
+        data_type: number
 
   - name: fct_concurrent_player_snapshots
-    description: One row per game x concurrent-player snapshot.
+    description: >
+      One row per game x concurrent-player snapshot. Incremental merge on
+      concurrent_player_snapshot_key, filtered on recorded_at (arrival
+      timestamp) with a lookback window (CONTEXT.md glossary). is_deleted
+      is carried through unfiltered (a merge can't delete a row that drops
+      out of its own select) — every downstream consumer filters
+      `where not is_deleted` itself.
+    config:
+      contract:
+        enforced: true
+    tests:
+      - elementary.volume_anomalies:
+          arguments:
+            timestamp_column: snapshot_at
+          config:
+            severity: warn
+      - elementary.freshness_anomalies:
+          arguments:
+            timestamp_column: snapshot_at
+          config:
+            severity: warn
     columns:
       - name: concurrent_player_snapshot_key
+        data_type: varchar
         tests: [unique, not_null]
+      - name: is_deleted
+        data_type: boolean
+        tests: [not_null]
       - name: game_key
+        data_type: varchar
         tests:
           - not_null
           - relationships:
+              config:
+                where: "not is_deleted"
               arguments:
                 to: ref('dim_games')
                 field: game_key
+      - name: player_count
+        data_type: number
+      - name: snapshot_at
+        data_type: timestamp_tz
+      - name: snapshot_date
+        data_type: date
+      - name: recorded_at
+        data_type: timestamp_tz
 
   - name: fct_wishlist_items
     description: >
       One row per wishlist add. removed_at is null while the item is still
       wishlisted. Singular test in tests/ covers removed_at >= added_at.
+    config:
+      contract:
+        enforced: true
+    tests:
+      - elementary.volume_anomalies:
+          arguments:
+            timestamp_column: added_at
+          config:
+            severity: warn
+      - elementary.freshness_anomalies:
+          arguments:
+            timestamp_column: added_at
+          config:
+            severity: warn
     columns:
       - name: wishlist_item_key
+        data_type: varchar
         tests: [unique, not_null]
       - name: user_key
+        data_type: varchar
         tests:
           - not_null
           - relationships:
@@ -194,13 +521,28 @@ models:
                 to: ref('dim_users')
                 field: user_key
       - name: game_key
+        data_type: varchar
         tests:
           - not_null
           - relationships:
               arguments:
                 to: ref('dim_games')
                 field: game_key
+      - name: added_at
+        data_type: timestamp_tz
+      - name: added_date
+        data_type: date
+      - name: removed_at
+        data_type: timestamp_tz
 
+  # Pipeline Health (fct_dbt_test_results, fct_source_freshness,
+  # fct_row_counts, fct_arrival_lag below) is deliberately NOT contracted.
+  # These are internal observability facts owned centrally by Central Data
+  # Eng rather than a business-owned shape a spoke team or external BI
+  # tool depends on (CONTEXT.md) - fct_arrival_lag isn't elementary-fed
+  # like its three siblings, but it's observability about the pipeline's
+  # own safety margin, not a business fact, so the same "not published"
+  # reasoning applies (#144's written "published" definition).
   - name: fct_dbt_test_results
     description: >
       One row per dbt schema x day. Daily test pass rate (pass_count /
@@ -253,6 +595,170 @@ models:
         tests: [not_null]
       - name: row_count
         tests: [not_null]
+
+  - name: fct_arrival_lag
+    description: >
+      One row per source table x day: observed arrival lag (event-time
+      column vs. recorded_at) for the two tables steam-infra's late-
+      arrival knobs can touch (client_events, playtime_sessions),
+      against the configured lookback window (var('arrival_lookback_days')).
+      Scoped to each table's most recent day of arrivals, anchored to
+      its own max(recorded_at) high-water mark rather than current_date()/
+      now() - the same reference frame incremental_lookback_filter()
+      itself uses (CONTEXT.md's "restatement" entry), so a build run
+      while the pipeline is stale still reads an honest margin instead
+      of a comfortable now()-relative one. Incremental, keyed on
+      (source_table, snapshot_date). Complements
+      #145's volume/freshness anomaly tests, which late arrival defeats
+      by construction (CONTEXT.md's fault-class table) - this model reads
+      the event-time/recorded_at gap directly instead of inferring it
+      from volume or recency. margin_days (lookback_window_days minus
+      p95_lag_days) makes the window's safety margin directly readable;
+      the warn test below fires once observed lag has eaten half of it,
+      tying the threshold to #134's own "window is double the tail bound"
+      design rationale rather than an arbitrary number.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [source_table, snapshot_date]
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: ">= lookback_window_days / 2"
+            column_name: margin_days
+          config:
+            severity: warn
+    columns:
+      - name: source_table
+        tests: [not_null]
+      - name: snapshot_date
+        tests: [not_null]
+      - name: arrival_count
+        tests: [not_null]
+      - name: max_lag_days
+        tests: [not_null]
+      - name: p95_lag_days
+        tests: [not_null]
+      - name: lookback_window_days
+        tests: [not_null]
+      - name: margin_days
+        tests: [not_null]
+
+unit_tests:
+  - name: test_fct_wishlist_items_excludes_deleted_rows
+    description: >
+      #143 model-boundary unit test: a wishlist item carrying the CDC
+      delete flag must not appear in fct_wishlist_items. Fixed input
+      rows, independent of any live drill having run.
+    model: fct_wishlist_items
+    given:
+      - input: ref('stg_steam__wishlist_items')
+        rows:
+          - wishlist_item_id: "11111111-1111-1111-1111-111111111111"
+            user_id: "u1"
+            game_id: "g1"
+            added_at: "2024-01-01T00:00:00"
+            removed_at: null
+            is_deleted: false
+          - wishlist_item_id: "22222222-2222-2222-2222-222222222222"
+            user_id: "u2"
+            game_id: "g2"
+            added_at: "2024-06-01T00:00:00"
+            removed_at: null
+            is_deleted: true
+    expect:
+      rows:
+        - added_date: "2024-01-01"
+          removed_at: null
+
+  - name: test_fct_playtime_sessions_carries_is_deleted_through
+    description: >
+      #143's original "excludes deleted rows" unit test no longer holds
+      post-#135: fct_playtime_sessions is now incremental merge, which
+      can't propagate a soft delete the way a table-materialized model
+      could (a row that stops appearing in the filtered select can never
+      be reached again to flip it - see CONTEXT.md's "is_deleted on an
+      incremental fact" glossary entry). is_deleted is carried through
+      unfiltered instead; this proves it rather than proving exclusion.
+      Runs against the non-incremental branch (#135 made this model
+      incremental; this isn't exercising the lookback filter).
+    model: fct_playtime_sessions
+    overrides:
+      macros:
+        is_incremental: false
+    given:
+      - input: ref('stg_steam__playtime_sessions')
+        rows:
+          - playtime_session_id: "11111111-1111-1111-1111-111111111111"
+            user_id: "u1"
+            game_id: "g1"
+            started_at: "2024-01-01T00:00:00"
+            ended_at: "2024-01-01T01:00:00"
+            recorded_at: "2024-01-01T01:05:00"
+            is_deleted: false
+          - playtime_session_id: "22222222-2222-2222-2222-222222222222"
+            user_id: "u2"
+            game_id: "g2"
+            started_at: "2024-06-01T00:00:00"
+            ended_at: "2024-06-01T01:00:00"
+            recorded_at: "2024-06-01T01:05:00"
+            is_deleted: true
+    expect:
+      rows:
+        - started_date: "2024-01-01"
+          is_open: false
+          duration_minutes: 60
+          is_deleted: false
+        - started_date: "2024-06-01"
+          is_open: false
+          duration_minutes: 60
+          is_deleted: true
+
+  - name: test_fct_purchases_payment_method_bucket
+    description: >
+      Model-boundary unit test (#139): a payment_method value outside the
+      known set lands in the explicit 'unknown' bucket rather than null or
+      falling out entirely; a known value passes through unchanged. Runs
+      against the non-incremental branch (#134 made fct_purchases
+      incremental; this test isn't exercising the lookback filter, see
+      test_fct_purchases_incremental_lookback_window in
+      _core__unit_tests.yml for that).
+    model: fct_purchases
+    overrides:
+      macros:
+        is_incremental: false
+    given:
+      - input: ref('int_purchases_with_fx')
+        rows:
+          - purchase_id: "p1"
+            purchase_key: "k1"
+            user_key: "u1"
+            game_key: "g1"
+            purchased_at: "2026-01-01T00:00:00"
+            purchase_date: "2026-01-01"
+            amount_cents: 1999
+            currency: "USD"
+            amount_usd: 19.99
+            payment_method: "steam_wallet"
+            is_deleted: false
+          - purchase_id: "p2"
+            purchase_key: "k2"
+            user_key: "u2"
+            game_key: "g2"
+            purchased_at: "2026-06-01T00:00:00"
+            purchase_date: "2026-06-01"
+            amount_cents: 2999
+            currency: "USD"
+            amount_usd: 29.99
+            payment_method: "crypto"
+            is_deleted: false
+    expect:
+      rows:
+        - purchase_key: "k1"
+          payment_method: "steam_wallet"
+          payment_method_bucket: "steam_wallet"
+        - purchase_key: "k2"
+          payment_method: "crypto"
+          payment_method_bucket: "unknown"
 
 seeds:
   - name: fx_rates

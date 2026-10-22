@@ -29,6 +29,8 @@ ownership_grants as (
 
     from {{ ref('fct_ownership_grants') }}
 
+    where not is_deleted
+
 ),
 
 wishlist_items_scored as (

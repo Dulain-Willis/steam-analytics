@@ -3,7 +3,9 @@
 -- fct_refunds so both derive purchase_key / user_key / game_key /
 -- amount_usd from one place instead of each recomputing the surrogate keys
 -- independently. Left unfiltered by is_deleted - each consumer decides
--- whether a deleted purchase belongs in its own grain.
+-- whether a deleted purchase belongs in its own grain. Carries recorded_at
+-- (the arrival timestamp) through so fct_purchases can apply its
+-- incremental lookback-window filter on it (CONTEXT.md glossary entry).
 with
 
 purchases as (
@@ -28,6 +30,7 @@ purchases_with_fx as (
         purchases.currency,
         purchases.payment_method,
         purchases.purchased_at,
+        purchases.recorded_at,
         purchases.is_deleted,
         fx_rates.rate_to_usd
 
@@ -52,6 +55,7 @@ final as (
         {{ dbt_utils.generate_surrogate_key(['game_id']) }} as game_key,
         purchased_at,
         purchased_at::date as purchase_date,
+        recorded_at,
         amount_cents,
         currency,
         amount_cents / 100.0 * rate_to_usd as amount_usd,
