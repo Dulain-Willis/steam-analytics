@@ -14,6 +14,8 @@ users as (
 
     from {{ ref('dim_users') }}
 
+    where not is_unknown_member
+
 ),
 
 marketing_campaigns as (

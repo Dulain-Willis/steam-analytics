@@ -4,6 +4,10 @@
 -- place this coalesce happens; it is never materialized as a fake row in
 -- dim_marketing_campaigns (CONTEXT.md). Shared by every marts/marketing
 -- fact that needs a user's channel or campaign attribution (issue #22).
+--
+-- The unknown-member sentinel (steam-infra #141) is excluded here: it
+-- isn't a real signup, and its NULL created_at/signup_date would otherwise
+-- leak a fake row into every downstream signup count.
 with
 
 users as (
@@ -14,6 +18,8 @@ users as (
         campaign_id
 
     from {{ ref('dim_users') }}
+
+    where not is_unknown_member
 
 ),
 
