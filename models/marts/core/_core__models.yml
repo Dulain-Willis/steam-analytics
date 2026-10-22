@@ -588,8 +588,13 @@ models:
       column vs. recorded_at) for the two tables steam-infra's late-
       arrival knobs can touch (client_events, playtime_sessions),
       against the configured lookback window (var('arrival_lookback_days')).
-      Scoped to that day's arrivals (recorded_at::date = current_date()),
-      incremental, keyed on (source_table, snapshot_date). Complements
+      Scoped to each table's most recent day of arrivals, anchored to
+      its own max(recorded_at) high-water mark rather than current_date()/
+      now() - the same reference frame incremental_lookback_filter()
+      itself uses (CONTEXT.md's "restatement" entry), so a build run
+      while the pipeline is stale still reads an honest margin instead
+      of a comfortable now()-relative one. Incremental, keyed on
+      (source_table, snapshot_date). Complements
       #145's volume/freshness anomaly tests, which late arrival defeats
       by construction (CONTEXT.md's fault-class table) - this model reads
       the event-time/recorded_at gap directly instead of inferring it
