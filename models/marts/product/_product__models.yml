@@ -60,11 +60,11 @@ models:
       - name: session_count
         data_type: number
       - name: avg_duration_minutes
-        data_type: float
+        data_type: number
       - name: p50_duration_minutes
-        data_type: float
+        data_type: number
       - name: p90_duration_minutes
-        data_type: float
+        data_type: number
 
   - name: fct_product_wishlist_conversion
     description: >
@@ -98,10 +98,10 @@ models:
         data_type: number
         tests: [not_null]
       - name: conversion_rate
-        data_type: float
+        data_type: number
         tests: [not_null]
       - name: median_days_to_convert
-        data_type: float
+        data_type: number
 
   - name: fct_product_funnel_sessions
     description: >

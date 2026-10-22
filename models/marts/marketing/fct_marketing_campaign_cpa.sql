@@ -58,7 +58,9 @@ final as (
         case
             when coalesce(attributed_signups.attributed_signup_count, 0) = 0 then null
             else
-                marketing_campaigns.spend_cents / 100.0 / attributed_signups.attributed_signup_count
+                (
+                    marketing_campaigns.spend_cents / 100.0 / attributed_signups.attributed_signup_count
+                )::float
         end as cpa_usd
 
     from marketing_campaigns
