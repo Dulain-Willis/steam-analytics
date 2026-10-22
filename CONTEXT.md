@@ -102,9 +102,15 @@ a synonym is listed as *avoid*, do not drift to it.
   append-only landing table already retains both versions via the
   existing PK-offset dedupe (same mechanism proven for a literal
   duplicate insert, #133), and the merge's `unique_key` match replaces
-  the prior version in the fact rather than duplicating it. **Limitation,
-  confirmed by #138**: this only holds while the restated row's bumped
-  `recorded_at` falls inside the `lookback window`. A correction applied
+  the prior version in the fact rather than duplicating it (the offline
+  proof: `test_stg_steam__ownership_grants_restated_row_replaces_prior_version`
+  plus the existing `test_fct_ownership_grants_incremental_lookback_window`;
+  the live-stack half — recording a published figure before/after a real
+  correction, and confirming a too-old restatement is actually dropped —
+  is #138's deferred live verification, see `live/138.md`). **Limitation,
+  reasoned through (not yet exercised live) by #138**: this only holds
+  while the restated row's bumped `recorded_at` falls inside the
+  `lookback window`. A correction applied
   *and landing* more than `arrival_lookback_days` after the table's
   current high-water mark is outside the window the next incremental run
   rescans, so it is silently never picked up — merge-on-unique-key would
