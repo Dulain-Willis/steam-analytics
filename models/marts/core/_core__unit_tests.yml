@@ -27,7 +27,12 @@ unit_tests:
       is rescanned; a row older than the window is left alone. Proves the
       filter guards on recorded_at, not purchased_at (event timestamp) -
       every fixture row's purchased_at is held fixed while recorded_at
-      moves, and only recorded_at decides inclusion.
+      moves, and only recorded_at decides inclusion. deleted_tombstone is
+      the PK-only row shape a CDC hard delete (or #143 compliance erasure)
+      actually produces - every column but the primary key and is_deleted
+      is null, recorded_at included, so it can never fall "inside" a
+      recorded_at-based window on its own merits. Proves is_deleted lets it
+      through regardless (steam-infra#129 integration review, finding 2).
     model: fct_purchases
     overrides:
       macros:
@@ -68,6 +73,10 @@ unit_tests:
             amount_usd: 30.0
             payment_method: card
             is_deleted: false
+          # PK-only CDC delete tombstone: every column but purchase_key and
+          # is_deleted is null, recorded_at included.
+          - purchase_key: deleted_tombstone
+            is_deleted: true
       - input: this
         rows:
           - recorded_at: "2024-06-15 00:00:00"
@@ -93,13 +102,18 @@ unit_tests:
           currency: USD
           amount_usd: 20.0
           payment_method: card
+        - purchase_key: deleted_tombstone
+          is_deleted: true
 
   - name: test_fct_ownership_grants_incremental_lookback_window
     description: >
       Same proof as test_fct_purchases_incremental_lookback_window, for
       fct_ownership_grants: the filter guards on recorded_at (arrival
       timestamp), not granted_at (event timestamp) - every fixture row's
-      granted_at is held fixed while recorded_at moves.
+      granted_at is held fixed while recorded_at moves. deleted_tombstone
+      is the PK-only row shape a CDC hard delete actually produces (every
+      column but the primary key and is_deleted is null) - proves
+      is_deleted lets it through regardless of recorded_at.
     model: fct_ownership_grants
     overrides:
       macros:
@@ -134,13 +148,18 @@ unit_tests:
             revoked_at: null
             recorded_at: "2024-05-20 00:00:00"
             is_deleted: false
+          # PK-only CDC delete tombstone: every column but
+          # ownership_grant_id and is_deleted is null, recorded_at included.
+          - ownership_grant_id: deleted_tombstone
+            is_deleted: true
       - input: this
         rows:
           - recorded_at: "2024-06-15 00:00:00"
     expect:
       # user_key/game_key are surrogate hashes computed inside this model,
       # not passed through from a fixture, so the comparison is scoped to
-      # the columns below - source distinguishes the two surviving rows.
+      # the columns below - source (null for the tombstone) distinguishes
+      # the three surviving rows.
       rows:
         - source: purchase
           granted_at: "2024-01-01 00:00:00"
@@ -150,6 +169,9 @@ unit_tests:
           granted_at: "2024-01-01 00:00:00"
           revoked_at: null
           recorded_at: "2024-06-01 00:00:00"
+        - source: null
+          granted_at: null
+          is_deleted: true
 
   - name: test_stg_steam__ownership_grants_restated_row_replaces_prior_version
     description: >
@@ -215,7 +237,10 @@ unit_tests:
       fct_playtime_sessions (#135): the filter guards on recorded_at
       (arrival timestamp), not started_at/ended_at (event timestamps) -
       every fixture row's started_at/ended_at is held fixed while
-      recorded_at moves.
+      recorded_at moves. deleted_tombstone is the PK-only row shape a CDC
+      hard delete actually produces (every column but the primary key and
+      is_deleted is null) - proves is_deleted lets it through regardless
+      of recorded_at.
     model: fct_playtime_sessions
     overrides:
       macros:
@@ -244,14 +269,19 @@ unit_tests:
             ended_at: "2024-01-01 01:00:00"
             recorded_at: "2024-05-20 00:00:00"
             is_deleted: false
+          # PK-only CDC delete tombstone: every column but
+          # playtime_session_id and is_deleted is null, recorded_at
+          # included.
+          - playtime_session_id: deleted_tombstone
+            is_deleted: true
       - input: this
         rows:
           - recorded_at: "2024-06-15 00:00:00"
     expect:
       # user_key/game_key are surrogate hashes computed inside this model,
       # not passed through from a fixture, so the comparison is scoped to
-      # the columns below - recorded_at distinguishes the two surviving
-      # rows.
+      # the columns below - started_at (null for the tombstone)
+      # distinguishes the three surviving rows.
       rows:
         - started_at: "2024-01-01 00:00:00"
           recorded_at: "2024-06-10 00:00:00"
@@ -261,6 +291,9 @@ unit_tests:
           recorded_at: "2024-06-01 00:00:00"
           is_open: false
           duration_minutes: 60
+        - started_at: null
+          is_deleted: true
+          is_open: true
 
   - name: test_fct_concurrent_player_snapshots_incremental_lookback_window
     description: >

@@ -205,6 +205,8 @@ models:
         tests:
           - not_null
           - relationships:
+              config:
+                where: "not is_deleted"
               arguments:
                 to: ref('dim_users')
                 field: user_key
@@ -213,6 +215,8 @@ models:
         tests:
           - not_null
           - relationships:
+              config:
+                where: "not is_deleted"
               arguments:
                 to: ref('dim_games')
                 field: game_key
@@ -348,6 +352,8 @@ models:
         tests:
           - not_null
           - relationships:
+              config:
+                where: "not is_deleted"
               arguments:
                 to: ref('dim_users')
                 field: user_key
@@ -356,6 +362,8 @@ models:
         tests:
           - not_null
           - relationships:
+              config:
+                where: "not is_deleted"
               arguments:
                 to: ref('dim_games')
                 field: game_key
@@ -407,6 +415,8 @@ models:
         tests:
           - not_null
           - relationships:
+              config:
+                where: "not is_deleted"
               arguments:
                 to: ref('dim_users')
                 field: user_key
@@ -415,6 +425,8 @@ models:
         tests:
           - not_null
           - relationships:
+              config:
+                where: "not is_deleted"
               arguments:
                 to: ref('dim_games')
                 field: game_key
@@ -464,6 +476,8 @@ models:
         tests:
           - not_null
           - relationships:
+              config:
+                where: "not is_deleted"
               arguments:
                 to: ref('dim_games')
                 field: game_key
