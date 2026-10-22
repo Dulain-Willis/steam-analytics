@@ -1,10 +1,12 @@
 -- Singular test (#143): once a user is erased (tombstoned by
--- steam-infra's scenarios/deletion_execution.py -- username rewritten to
--- 'deleted-user-<id>'), their behavioural rows must actually be gone, not
--- just filtered. Checks active (not is_deleted) rows in each hard-delete-
--- tier staging model for any user whose stg_steam__users row carries the
--- erasure tombstone. Passes trivially (no erased users yet) if no drill
--- has run; fails if an erased user's behavioural rows persist.
+-- steam-infra's scenarios/deletion_execution.py), their behavioural rows
+-- must actually be gone, not just filtered. Checks active (not is_deleted)
+-- rows in each hard-delete-tier staging model for any user whose
+-- stg_steam__users row has deletion_executed_at set - the durable
+-- execution signal (steam-infra#129 integration review, finding 9),
+-- rather than pattern-matching the username tombstone deletion_execution.py
+-- also writes as a side effect. Passes trivially (no erased users yet) if
+-- no drill has run; fails if an erased user's behavioural rows persist.
 with
 
 erased_users as (
@@ -13,7 +15,7 @@ erased_users as (
 
     from {{ ref('stg_steam__users') }}
 
-    where username like 'deleted-user-%'
+    where deletion_executed_at is not null
 
 ),
 
