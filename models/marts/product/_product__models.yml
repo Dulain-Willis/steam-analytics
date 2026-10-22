@@ -430,3 +430,87 @@ unit_tests:
         - session_id: "s4"
           user_id: "late_user"
           resolved_user_id: "late_user"
+
+  - name: test_stg_steam__client_events_backfills_deleted_tombstone
+    description: >
+      steam-infra#129 integration review, finding 6: a rewrite-mode CDC
+      delete tombstone for client_events is PK-only (event_id plus
+      __deleted=true) - every other column, session_id included, is null
+      in the raw landing row. client_events is insert-once/delete-only, so
+      the tombstone is backfilled from its own prior (pre-delete) row
+      before the offset-dedupe collapses the pair to one, rather than
+      landing in stg_steam__client_events with its session_id lost.
+      Without this, a hard-deleted event can never be attributed back to
+      its funnel session - see
+      test_fct_product_funnel_sessions_revisits_fully_deleted_session for
+      the consumer-side proof this backfill unblocks.
+    model: stg_steam__client_events
+    given:
+      - input: source('steam', 'client_events')
+        rows:
+          - event_id: "e1"
+            user_id: "u1"
+            session_id: "s1"
+            game_id: "g1"
+            event_name: "store_page_view"
+            occurred_at: "2024-01-01 00:00:00"
+            recorded_at: "2024-01-01 00:05:00"
+            __deleted: false
+            record_metadata: { offset: 1 }
+          - event_id: "e1"
+            user_id: null
+            session_id: null
+            game_id: null
+            event_name: null
+            occurred_at: null
+            recorded_at: null
+            __deleted: true
+            record_metadata: { offset: 2 }
+    expect:
+      rows:
+        - event_id: "e1"
+          user_id: "u1"
+          session_id: "s1"
+          game_id: "g1"
+          event_name: "store_page_view"
+          occurred_at: "2024-01-01 00:00:00"
+          recorded_at: "2024-01-01 00:05:00"
+          is_deleted: true
+
+  - name: test_fct_product_funnel_sessions_revisits_fully_deleted_session
+    description: >
+      steam-infra#129 integration review, finding 6, consumer-side proof:
+      once stg_steam__client_events backfills a delete tombstone's
+      session_id (see test_stg_steam__client_events_backfills_deleted_
+      tombstone), a session every one of whose events was just hard-
+      deleted has a real session_id and a real recorded_at to carry
+      through - incremental_lookback_filter()'s is_deleted branch (fix 2)
+      then lets it into touched_sessions regardless of how old that
+      recorded_at is, so the merge revisits the session and flips
+      is_deleted to true instead of leaving it indefinitely live.
+    model: fct_product_funnel_sessions
+    overrides:
+      macros:
+        is_incremental: true
+    given:
+      - input: ref('stg_steam__client_events')
+        rows:
+          - event_id: fully_deleted
+            session_id: s_erased
+            user_id: u1
+            game_id: g1
+            event_name: store_page_view
+            occurred_at: "2024-01-01 00:00:00"
+            recorded_at: "2024-01-01 00:05:00"
+            is_deleted: true
+      - input: ref('dim_users')
+        rows:
+          - user_id: u1
+      - input: this
+        rows:
+          - recorded_at: "2024-06-15 00:00:00"
+    expect:
+      rows:
+        - session_id: s_erased
+          is_deleted: true
+          has_reached_store_page_view: false
