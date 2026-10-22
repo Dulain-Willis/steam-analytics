@@ -68,6 +68,23 @@ a synonym is listed as *avoid*, do not drift to it.
   filtering on event time would make the next incremental run silently skip
   it forever. *Avoid* filtering an incremental model on anything but its
   arrival timestamp.
+- **late arrival** — steam-infra's `LATE_ARRIVAL_RATE`/`LATE_ARRIVAL_MAX_DAYS`
+  generator knobs (#136), applied only to `client_events.occurred_at` and
+  `playtime_sessions.started_at` — the two columns with a physically
+  plausible offline client. A late-arriving row is inserted at the real
+  current time (`recorded_at` keeps its database default) while its
+  event-time column is backdated into the **arrival-tail bound** below —
+  the opposite of the existing *arrival jitter* (`PURCHASE_RECORDED_AT_JITTER_MAX_SECONDS`
+  and siblings), which nudges `recorded_at` forward from an
+  already-correct event time to model ordinary write latency and still
+  feeds the source-freshness fact untouched. *Avoid* calling late arrival
+  a form of jitter, or widening the jitter knobs to simulate it — they are
+  two different mechanisms answering two different questions.
+- **arrival-tail bound** — `LATE_ARRIVAL_MAX_DAYS` (default **7 days**),
+  the maximum a late-arriving row's event-time column is ever backdated.
+  Low hit rate (`LATE_ARRIVAL_RATE`, default **0.01**) keeps the ordinary
+  case same-second and the source-freshness fact undisturbed. The lookback
+  window below is set to double this bound.
 - **lookback window** — how many days back of `arrival timestamp` an
   incremental merge model rescans on every run (`var('arrival_lookback_days')`
   in `dbt_project.yml`, currently **14 days**), to catch a late-arriving or
