@@ -522,12 +522,13 @@ models:
         data_type: timestamp_tz
 
   # Pipeline Health (fct_dbt_test_results, fct_source_freshness,
-  # fct_row_counts below) is deliberately NOT contracted. These are
-  # internal observability facts fed by the vendored elementary package
-  # (CONTEXT.md), not a business-owned shape a spoke team or external BI
-  # tool depends on - and contracting them would pin this project to
-  # elementary's own upstream schema, which this project does not control.
-  # See #144's written record for the full "published" definition.
+  # fct_row_counts, fct_arrival_lag below) is deliberately NOT contracted.
+  # These are internal observability facts owned centrally by Central Data
+  # Eng rather than a business-owned shape a spoke team or external BI
+  # tool depends on (CONTEXT.md) - fct_arrival_lag isn't elementary-fed
+  # like its three siblings, but it's observability about the pipeline's
+  # own safety margin, not a business fact, so the same "not published"
+  # reasoning applies (#144's written "published" definition).
   - name: fct_dbt_test_results
     description: >
       One row per dbt schema x day. Daily test pass rate (pass_count /
@@ -579,6 +580,48 @@ models:
       - name: snapshot_date
         tests: [not_null]
       - name: row_count
+        tests: [not_null]
+
+  - name: fct_arrival_lag
+    description: >
+      One row per source table x day: observed arrival lag (event-time
+      column vs. recorded_at) for the two tables steam-infra's late-
+      arrival knobs can touch (client_events, playtime_sessions),
+      against the configured lookback window (var('arrival_lookback_days')).
+      Scoped to that day's arrivals (recorded_at::date = current_date()),
+      incremental, keyed on (source_table, snapshot_date). Complements
+      #145's volume/freshness anomaly tests, which late arrival defeats
+      by construction (CONTEXT.md's fault-class table) - this model reads
+      the event-time/recorded_at gap directly instead of inferring it
+      from volume or recency. margin_days (lookback_window_days minus
+      p95_lag_days) makes the window's safety margin directly readable;
+      the warn test below fires once observed lag has eaten half of it,
+      tying the threshold to #134's own "window is double the tail bound"
+      design rationale rather than an arbitrary number.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [source_table, snapshot_date]
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: ">= lookback_window_days / 2"
+            column_name: margin_days
+          config:
+            severity: warn
+    columns:
+      - name: source_table
+        tests: [not_null]
+      - name: snapshot_date
+        tests: [not_null]
+      - name: arrival_count
+        tests: [not_null]
+      - name: max_lag_days
+        tests: [not_null]
+      - name: p95_lag_days
+        tests: [not_null]
+      - name: lookback_window_days
+        tests: [not_null]
+      - name: margin_days
         tests: [not_null]
 
 unit_tests:

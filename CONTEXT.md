@@ -139,8 +139,12 @@ a synonym is listed as *avoid*, do not drift to it.
   and has no `marts/core` conformed source to build on. Schemas:
   `marts_product`, `marts_marketing`, `marts_finance`.
 - **Pipeline Health** — facts about the pipeline itself (`fct_dbt_test_results`,
-  `fct_source_freshness`, `fct_row_counts`), fed by the `elementary` package.
-  Lives in `marts/core`, owned by Central Data Eng — not a spoke.
+  `fct_source_freshness`, `fct_row_counts`, `fct_arrival_lag`). The first
+  three are fed by the `elementary` package; `fct_arrival_lag` (#137) is
+  bespoke SQL over `stg_steam__client_events`/`stg_steam__playtime_sessions`
+  instead, since it measures a gap (event-time vs. `recorded_at`) elementary
+  has no concept of. All four live in `marts/core`, owned by Central Data
+  Eng — not a spoke.
   `fct_pipeline_runs` was named here but was never built; removed (steam-infra
   #145). Elementary's volume/freshness anomaly-detection tests (#145) need no
   fourth model of their own — they run as ordinary dbt generic tests, so
@@ -172,7 +176,7 @@ mechanism rather than assumed:
 |---|---|---|---|
 | Backdated updates (continuous) | restates an old row, written now | **Yes** — `volume_anomalies`: the restatement is an extra CDC row landing "now," so it bumps the `recorded_at` bucket's row count even though the row's own event-time is old. | `volume_anomalies` is the sole automated detector; spec says no new handling mechanism is needed beyond `merge` + lookback. |
 | Business-key duplicates (continuous, purchases) | second row, same business key, distinct PK | **Yes** — `volume_anomalies` on both `stg_steam__purchases` (`recorded_at`) and `fct_purchases` (`purchased_at`); the duplicate lands in the same bucket as its twin either way. | `volume_anomalies` is a real backstop here — it would have caught this even if the purpose-written `dbt_utils.unique_combination_of_columns` test (#133) had never been written. |
-| Late arrival (continuous, client_events/playtime_sessions) | row written now, event-time backdated up to 7d | **No.** It substitutes for an on-time row rather than adding one, so table-wide row count is unaffected, and `recorded_at`'s max is always "now" regardless. Freshness-by-event-time is also unaffected, since on-time rows keep the max fresh. | #137's purpose-built arrival-lag monitor (compares `occurred_at`/`started_at` against `recorded_at` against the configured lookback window) — a bespoke Pipeline Health model, not a generic anomaly test. |
+| Late arrival (continuous, client_events/playtime_sessions) | row written now, event-time backdated up to 7d | **No.** It substitutes for an on-time row rather than adding one, so table-wide row count is unaffected, and `recorded_at`'s max is always "now" regardless. Freshness-by-event-time is also unaffected, since on-time rows keep the max fresh. | `fct_arrival_lag` (#137), a purpose-built Pipeline Health monitor that compares `occurred_at`/`started_at` against `recorded_at` against the configured lookback window directly — not a generic anomaly test. |
 | Unknown enum value onset (payment_method) | new value in an existing column | **No.** Same row count, same timing — only a value changes. Neither row-count nor recency anomaly detection can see a value distribution shift. | Purpose-written warn-severity `accepted_values` test (#139). No anomaly-detection fallback exists for this class. |
 | Orphan references (client_events.user_id, FK dropped) | child rows with no matching parent | **No**, as configured — table-wide event volume is unaffected by orphan rate (the same number of child rows arrive either way). Spec names a narrower variant ("anomaly detection on orphan volume") scoped to the unknown-member join via `where_expression` - a natural follow-on now that #141's unknown-member row exists, but not configured yet. | Purpose-written warn-severity `relationships` test on `fct_product_funnel_sessions.user_id` → `dim_users.user_id` (#141). |
 | Compliance erasure (one-shot scenario) | hard-delete / anonymize / retain, per-user | **No**, not at realistic drill scale — one user's rows are noise against daily volume/freshness. | Purpose-written singular tests (#143): no erased user's behavioral rows persist; retained transaction rows survive erasure. |
@@ -208,10 +212,14 @@ upstream) that sits alongside, not on top of, the seven-class taxonomy.
   every column in that model's schema yml. *Published* here means every
   model in `models/marts/{core,product,marketing,finance}` **except**
   Pipeline Health (`fct_dbt_test_results`, `fct_source_freshness`,
-  `fct_row_counts`) — Pipeline Health is internal observability fed by
-  the vendored `elementary` package rather than a business-owned shape,
-  and contracting it would pin this project to elementary's own upstream
-  schema. A contracted model whose SQL stops producing a declared column,
+  `fct_row_counts`, `fct_arrival_lag`) — Pipeline Health is internal
+  observability about the pipeline's own health/safety margin rather than
+  a business-owned shape a spoke team or BI tool depends on. Three of the
+  four are fed by the vendored `elementary` package, where contracting
+  would additionally pin this project to elementary's own upstream
+  schema; `fct_arrival_lag` (#137) isn't elementary-fed, but the same
+  "not a business-owned shape" reasoning excludes it too. A contracted
+  model whose SQL stops producing a declared column,
   or changes one's type, fails the build (`dbt build`/`dbt run` raises a
   contract error) instead of silently reshaping a table a spoke team or
   BI tool depends on. A contract only constrains the columns a model
