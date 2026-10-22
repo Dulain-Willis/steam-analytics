@@ -301,7 +301,10 @@ unit_tests:
       fct_concurrent_player_snapshots (#135): the filter guards on
       recorded_at (arrival timestamp), not snapshot_at (event timestamp) -
       every fixture row's snapshot_at is held fixed while recorded_at
-      moves.
+      moves. deleted_tombstone is the PK-only row shape a CDC hard delete
+      actually produces (every column but the primary key and is_deleted
+      is null) - proves is_deleted lets it through regardless of
+      recorded_at.
     model: fct_concurrent_player_snapshots
     overrides:
       macros:
@@ -327,13 +330,19 @@ unit_tests:
             snapshot_at: "2024-01-01 00:00:00"
             recorded_at: "2024-05-20 00:00:00"
             is_deleted: false
+          # PK-only CDC delete tombstone: every column but
+          # concurrent_player_snapshot_id and is_deleted is null,
+          # recorded_at included.
+          - concurrent_player_snapshot_id: deleted_tombstone
+            is_deleted: true
       - input: this
         rows:
           - recorded_at: "2024-06-15 00:00:00"
     expect:
       # game_key is a surrogate hash computed inside this model, not
       # passed through from a fixture, so the comparison is scoped to the
-      # columns below - player_count distinguishes the two surviving rows.
+      # columns below - player_count (null for the tombstone)
+      # distinguishes the three surviving rows.
       rows:
         - player_count: 100
           snapshot_at: "2024-01-01 00:00:00"
@@ -341,6 +350,8 @@ unit_tests:
         - player_count: 200
           snapshot_at: "2024-01-01 00:00:00"
           recorded_at: "2024-06-01 00:00:00"
+        - player_count: null
+          is_deleted: true
 
   - name: test_dim_users_always_has_unknown_member
     description: >
