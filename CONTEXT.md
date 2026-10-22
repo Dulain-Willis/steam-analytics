@@ -108,6 +108,37 @@ a synonym is listed as *avoid*, do not drift to it.
   `fct_ownership_grants` (#134); `fct_row_counts` (Pipeline Health) already
   used this strategy before #134 established it as the pattern for business
   facts.
+- **restatement** — a correction to a historical row that leaves its
+  event-time column untouched (`granted_at`, `purchased_at`, …) while
+  bumping `recorded_at` to "now" — what a reversed/late-processed refund
+  or a price backfill looks like in a source system, as opposed to a
+  late-arriving row (new event, backdated event time) or a genuinely new
+  event. steam-infra#138 adds a generator event (`restatement`, reversing
+  a historical `ownership_grants` revocation) to prove `incremental
+  merge` + the `lookback window` cover it with no new mechanism: the
+  append-only landing table already retains both versions via the
+  existing PK-offset dedupe (same mechanism proven for a literal
+  duplicate insert, #133), and the merge's `unique_key` match replaces
+  the prior version in the fact rather than duplicating it (the offline
+  proof: `test_stg_steam__ownership_grants_restated_row_replaces_prior_version`
+  plus the existing `test_fct_ownership_grants_incremental_lookback_window`;
+  the live-stack half — recording a published figure before/after a real
+  correction, and confirming a too-old restatement is actually dropped —
+  is #138's deferred live verification, see `live/138.md`). **Limitation,
+  reasoned through (not yet exercised live) by #138**: this only holds
+  while the restated row's bumped `recorded_at` falls inside the
+  `lookback window`. A correction applied
+  *and landing* more than `arrival_lookback_days` after the table's
+  current high-water mark is outside the window the next incremental run
+  rescans, so it is silently never picked up — merge-on-unique-key would
+  still absorb it correctly if the model ever rescanned that row, but the
+  lookback filter never lets it reach the merge in the first place. No
+  code change closes this: it is the same bounded-staleness trade-off the
+  window makes for every other case (cheap, bounded rescans vs. unbounded
+  full-history rescans on every run), just surfaced here for a
+  restatement specifically. A correction known in advance to arrive later
+  than the window needs a wider window or a one-off `--full-refresh`, not
+  a generic fix.
 - **is_deleted on an incremental fact** — an incremental merge model carries
   `is_deleted` through unfiltered, unlike a table-materialized mart (which
   filters `where not is_deleted` on first consumption, CDC landing above).
