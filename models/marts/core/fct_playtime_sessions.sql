@@ -76,13 +76,17 @@ final as (
         -- observed live on the #129 bring-up as
         --   New column types: [{'column_name': 'DURATION_MINUTES',
         --                       'new_type': 'NUMBER(18,0)'}]
+        -- Cast to bare `number` (= NUMBER(38,0)) specifically, because the
+        -- contract declares `number` and contract enforcement builds the
+        -- table from the DECLARED type -- so a narrower cast here disagrees
+        -- with the contract's own table on the next incremental run.
         -- after the generator was redeployed, with no model change at all.
         -- Without the cast this model fails intermittently whenever the
         -- inferred precision moves.
         case
             when ended_at is not null
                 then datediff('minute', started_at, ended_at)
-        end::number(18, 0) as duration_minutes,
+        end::number as duration_minutes,
         is_deleted
 
     from {{ 'within_lookback_window' if is_incremental() else 'playtime_sessions' }}
