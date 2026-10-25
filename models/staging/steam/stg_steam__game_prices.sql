@@ -24,6 +24,6 @@ select
     currency,
     price_cents,
     updated_at::timestamp_tz as updated_at,
-    coalesce(__deleted, false) as is_deleted
+    coalesce(try_to_boolean(__deleted), false) as is_deleted
 
 from source

@@ -26,6 +26,6 @@ select
     languages,
     parse_json(tags) as tags,
     created_at::timestamp_tz as created_at,
-    coalesce(__deleted, false) as is_deleted
+    coalesce(try_to_boolean(__deleted), false) as is_deleted
 
 from source

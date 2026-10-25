@@ -30,6 +30,6 @@ select
     -- null only once, never cleared. Downstream tests key off this
     -- instead of pattern-matching the username tombstone it also sets.
     deletion_executed_at::timestamp_tz as deletion_executed_at,
-    coalesce(__deleted, false) as is_deleted
+    coalesce(try_to_boolean(__deleted), false) as is_deleted
 
 from source

@@ -25,6 +25,6 @@ select
     sent_at::timestamp_tz as sent_at,
     redeemed_at::timestamp_tz as redeemed_at,
     recorded_at::timestamp_tz as recorded_at,
-    coalesce(__deleted, false) as is_deleted
+    coalesce(try_to_boolean(__deleted), false) as is_deleted
 
 from source

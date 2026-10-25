@@ -48,7 +48,7 @@ backfilled as (
         max(event_name) over (partition by event_id) as event_name,
         max(props) over (partition by event_id) as props,
         max(recorded_at) over (partition by event_id) as recorded_at,
-        coalesce(__deleted, false) as is_deleted,
+        coalesce(try_to_boolean(__deleted), false) as is_deleted,
         record_metadata
 
     from source

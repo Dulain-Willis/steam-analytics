@@ -24,6 +24,6 @@ select
     is_chargeback,
     refunded_at::timestamp_tz as refunded_at,
     recorded_at::timestamp_tz as recorded_at,
-    coalesce(__deleted, false) as is_deleted
+    coalesce(try_to_boolean(__deleted), false) as is_deleted
 
 from source

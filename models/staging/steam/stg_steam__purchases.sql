@@ -26,6 +26,6 @@ select
     payment_method,
     purchased_at::timestamp_tz as purchased_at,
     recorded_at::timestamp_tz as recorded_at,
-    coalesce(__deleted, false) as is_deleted
+    coalesce(try_to_boolean(__deleted), false) as is_deleted
 
 from source
