@@ -24,6 +24,6 @@ select
     started_at::timestamp_tz as started_at,
     ended_at::timestamp_tz as ended_at,
     recorded_at::timestamp_tz as recorded_at,
-    coalesce(__deleted, false) as is_deleted
+    coalesce(try_to_boolean(__deleted), false) as is_deleted
 
 from source

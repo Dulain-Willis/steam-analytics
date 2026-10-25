@@ -9,12 +9,15 @@ models:
       never carries a fake "organic" row. Singular tests in tests/ cover
       non-negative signup_count and independently re-derive organic vs.
       campaign-attributed counts from dim_users / dim_marketing_campaigns.
+    config:
+      contract:
+        enforced: true
     columns:
-      - name: marketing_signups_daily_key
-        tests: [unique, not_null]
       - name: signup_date
+        data_type: date
         tests: [not_null]
       - name: channel
+        data_type: varchar
         tests:
           - not_null
           - accepted_values:
@@ -28,7 +31,11 @@ models:
                     'affiliate',
                     'organic',
                   ]
+      - name: marketing_signups_daily_key
+        data_type: varchar
+        tests: [unique, not_null]
       - name: signup_count
+        data_type: number
         tests: [not_null]
 
   - name: fct_marketing_campaign_cpa
@@ -42,10 +49,15 @@ models:
       attributed_signup_count and recomputing the ratio - do not average
       cpa_usd across campaigns. Singular test in tests/ covers non-negative
       measures.
+    config:
+      contract:
+        enforced: true
     columns:
       - name: marketing_campaign_cpa_key
+        data_type: varchar
         tests: [unique, not_null]
       - name: marketing_campaign_key
+        data_type: varchar
         tests:
           - unique
           - not_null
@@ -54,6 +66,7 @@ models:
                 to: ref('dim_marketing_campaigns')
                 field: marketing_campaign_key
       - name: channel
+        data_type: varchar
         tests:
           - not_null
           - accepted_values:
@@ -67,9 +80,13 @@ models:
                     'affiliate',
                   ]
       - name: spend_cents
+        data_type: number
         tests: [not_null]
       - name: attributed_signup_count
+        data_type: number
         tests: [not_null]
+      - name: cpa_usd
+        data_type: float
 
   - name: fct_marketing_campaign_revenue
     description: >
@@ -79,10 +96,15 @@ models:
       attributed users only (organic revenue is out of scope for this
       model). Roll up to channel by summing attributed_revenue_usd.
       Singular test in tests/ covers non-negative measures.
+    config:
+      contract:
+        enforced: true
     columns:
       - name: marketing_campaign_revenue_key
+        data_type: varchar
         tests: [unique, not_null]
       - name: marketing_campaign_key
+        data_type: varchar
         tests:
           - unique
           - not_null
@@ -91,6 +113,7 @@ models:
                 to: ref('dim_marketing_campaigns')
                 field: marketing_campaign_key
       - name: channel
+        data_type: varchar
         tests:
           - not_null
           - accepted_values:
@@ -104,4 +127,5 @@ models:
                     'affiliate',
                   ]
       - name: attributed_revenue_usd
+        data_type: float
         tests: [not_null]

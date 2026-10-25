@@ -7,14 +7,21 @@ models:
       active that day; wau = trailing 7-calendar-day distinct count. Global,
       no cohort split (see fct_product_session_length_daily for that).
       Singular test in tests/ covers non-negative measures and wau >= dau.
+    config:
+      contract:
+        enforced: true
     columns:
-      - name: active_users_daily_key
-        tests: [unique, not_null]
       - name: active_date
+        data_type: date
+        tests: [unique, not_null]
+      - name: active_users_daily_key
+        data_type: varchar
         tests: [unique, not_null]
       - name: dau
+        data_type: number
         tests: [not_null]
       - name: wau
+        data_type: number
         tests: [not_null]
 
   - name: fct_product_session_length_daily
@@ -25,12 +32,15 @@ models:
       and 'returning' on every later one. Open sessions are excluded - a
       session with no duration can't contribute to session length.
       Singular test in tests/ covers non-negative measures.
+    config:
+      contract:
+        enforced: true
     columns:
-      - name: session_length_daily_key
-        tests: [unique, not_null]
       - name: started_date
+        data_type: date
         tests: [not_null]
       - name: game_key
+        data_type: varchar
         tests:
           - not_null
           - relationships:
@@ -38,11 +48,23 @@ models:
                 to: ref('dim_games')
                 field: game_key
       - name: user_cohort
+        data_type: varchar
         tests:
           - not_null
           - accepted_values:
               arguments:
                 values: ['new', 'returning']
+      - name: session_length_daily_key
+        data_type: varchar
+        tests: [unique, not_null]
+      - name: session_count
+        data_type: number
+      - name: avg_duration_minutes
+        data_type: number
+      - name: p50_duration_minutes
+        data_type: number
+      - name: p90_duration_minutes
+        data_type: number
 
   - name: fct_product_wishlist_conversion
     description: >
@@ -53,10 +75,12 @@ models:
       the earliest such grant, over converted rows only. Singular tests in
       tests/ cover non-negative measures and independently re-derive the
       conversion logic from the core facts.
+    config:
+      contract:
+        enforced: true
     columns:
-      - name: wishlist_conversion_key
-        tests: [unique, not_null]
       - name: game_key
+        data_type: varchar
         tests:
           - unique
           - not_null
@@ -64,12 +88,20 @@ models:
               arguments:
                 to: ref('dim_games')
                 field: game_key
+      - name: wishlist_conversion_key
+        data_type: varchar
+        tests: [unique, not_null]
       - name: wishlist_add_count
+        data_type: number
         tests: [not_null]
       - name: converted_count
+        data_type: number
         tests: [not_null]
       - name: conversion_rate
+        data_type: number
         tests: [not_null]
+      - name: median_days_to_convert
+        data_type: number
 
   - name: fct_product_funnel_sessions
     description: >
@@ -82,20 +114,412 @@ models:
       its first-occurred timestamp plus a has_reached_<stage> boolean;
       purchase_complete is a marker only - amount / grant detail comes from
       fct_ownership_grants. Singular test in tests/ covers stage timestamps
-      being non-decreasing within a session.
+      being non-decreasing within a session. Incremental merge on
+      funnel_session_key, filtered on each contributing client_events
+      row's recorded_at (arrival timestamp) with a lookback window
+      (CONTEXT.md glossary). is_deleted is carried through unfiltered
+      (true only when every event contributing to the session is deleted)
+      — a merge can't delete a row that drops out of its own select —
+      every downstream consumer filters `where not is_deleted` itself.
+      user_id is the raw, pre-resolution value (client_events.user_id can
+      be orphaned - steam-infra #140/#141); resolved_user_id is what the
+      model actually resolves it to - the real user, or the
+      unknown-member sentinel row in dim_users when no real user
+      matches.
+    config:
+      contract:
+        enforced: true
     columns:
-      - name: funnel_session_key
-        tests: [unique, not_null]
       - name: session_id
+        data_type: varchar
         tests: [unique, not_null]
+      - name: is_deleted
+        data_type: boolean
+        tests: [not_null]
       - name: user_id
+        data_type: varchar
+        description: >
+          Raw client_events.user_id, kept only so the relationships test
+          below can report orphan volume - not used for joins downstream
+          (use resolved_user_id instead).
         tests:
           - not_null
           - relationships:
               arguments:
                 to: ref('dim_users')
                 field: user_id
+              config:
+                severity: warn
+      - name: resolved_user_id
+        data_type: varchar
+        description: >
+          user_id resolved against dim_users: the real user, or the
+          unknown-member sentinel ('unknown_member') when user_id is an
+          orphan. Always matches a dim_users row, so this relationships
+          test is a correctness backstop, not an orphan report.
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_users')
+                field: user_id
+      - name: funnel_session_key
+        data_type: varchar
+        tests: [unique, not_null]
       - name: session_date
+        data_type: date
         tests: [not_null]
       - name: session_started_at
+        data_type: timestamp_tz
         tests: [not_null]
+      - name: recorded_at
+        data_type: timestamp_tz
+      - name: store_page_view_at
+        data_type: timestamp_tz
+      - name: game_page_view_at
+        data_type: timestamp_tz
+      - name: add_to_wishlist_at
+        data_type: timestamp_tz
+      - name: begin_checkout_at
+        data_type: timestamp_tz
+      - name: purchase_complete_at
+        data_type: timestamp_tz
+      - name: has_reached_store_page_view
+        data_type: boolean
+      - name: has_reached_game_page_view
+        data_type: boolean
+      - name: has_reached_add_to_wishlist
+        data_type: boolean
+      - name: has_reached_begin_checkout
+        data_type: boolean
+      - name: has_reached_purchase_complete
+        data_type: boolean
+
+unit_tests:
+  - name: test_fct_product_funnel_sessions_carries_is_deleted_through
+    description: >
+      #143's original "excludes deleted rows" unit test no longer holds
+      post-#135: fct_product_funnel_sessions is now incremental merge,
+      which can't propagate a soft delete the way a table-materialized
+      model could (a session whose only surviving event fell outside a
+      later run's lookback window would simply drop out of the select,
+      and the merge can never reach its already-materialized row again to
+      flip it - see CONTEXT.md's "is_deleted on an incremental fact"
+      glossary entry). is_deleted is carried through unfiltered instead,
+      true only when every event contributing to the session is deleted
+      (booland_agg) - this proves that rather than proving exclusion.
+      s3 additionally proves a deleted event within an otherwise-live
+      session doesn't count toward has_reached_<stage> (code review
+      finding on the original #135 diff: the stage timestamps must
+      exclude individually-deleted events even when the session as a
+      whole is not is_deleted). Runs against the non-incremental branch
+      (#135 made this model incremental; this isn't exercising the
+      lookback filter).
+    model: fct_product_funnel_sessions
+    overrides:
+      macros:
+        is_incremental: false
+    given:
+      - input: ref('stg_steam__client_events')
+        rows:
+          - event_id: "11111111-1111-1111-1111-111111111111"
+            session_id: "s1"
+            user_id: "u1"
+            game_id: "g1"
+            event_name: "store_page_view"
+            occurred_at: "2024-01-01T00:00:00"
+            recorded_at: "2024-01-01T00:05:00"
+            is_deleted: false
+          - event_id: "22222222-2222-2222-2222-222222222222"
+            session_id: "s2"
+            user_id: "u2"
+            game_id: "g2"
+            event_name: "store_page_view"
+            occurred_at: "2024-06-01T00:00:00"
+            recorded_at: "2024-06-01T00:05:00"
+            is_deleted: true
+          - event_id: "33333333-3333-3333-3333-333333333333"
+            session_id: "s3"
+            user_id: "u3"
+            game_id: "g3"
+            event_name: "store_page_view"
+            occurred_at: "2024-09-01T00:00:00"
+            recorded_at: "2024-09-01T00:05:00"
+            is_deleted: true
+          - event_id: "44444444-4444-4444-4444-444444444444"
+            session_id: "s3"
+            user_id: "u3"
+            game_id: "g3"
+            event_name: "game_page_view"
+            occurred_at: "2024-09-01T00:10:00"
+            recorded_at: "2024-09-01T00:15:00"
+            is_deleted: false
+      - input: ref('dim_users')
+        rows:
+          - { user_id: 'u1' }
+    expect:
+      rows:
+        - session_id: "s1"
+          has_reached_store_page_view: true
+          has_reached_game_page_view: false
+          is_deleted: false
+        - session_id: "s2"
+          has_reached_store_page_view: false
+          has_reached_game_page_view: false
+          is_deleted: true
+        - session_id: "s3"
+          has_reached_store_page_view: false
+          has_reached_game_page_view: true
+          is_deleted: false
+
+  - name: test_fct_product_funnel_sessions_incremental_lookback_window
+    description: >
+      Same proof as fct_purchases'/fct_ownership_grants'
+      incremental-lookback-window unit tests (steam-analytics
+      _core__unit_tests.yml), for fct_product_funnel_sessions (#135): the
+      filter guards each client_events row on its own recorded_at
+      (arrival timestamp), not occurred_at (event timestamp) - every
+      fixture row's occurred_at is held fixed while recorded_at moves.
+      One event per session here, so the filter's effect on the
+      aggregation is the same as on a flat 1:1 row.
+    model: fct_product_funnel_sessions
+    overrides:
+      macros:
+        is_incremental: true
+    given:
+      - input: ref('stg_steam__client_events')
+        rows:
+          - event_id: inside_window
+            session_id: s_inside
+            user_id: u1
+            game_id: g1
+            event_name: store_page_view
+            occurred_at: "2024-01-01 00:00:00"
+            recorded_at: "2024-06-10 00:00:00"
+            is_deleted: false
+          - event_id: at_cutoff
+            session_id: s_cutoff
+            user_id: u2
+            game_id: g2
+            event_name: store_page_view
+            occurred_at: "2024-01-01 00:00:00"
+            recorded_at: "2024-06-01 00:00:00"
+            is_deleted: false
+          - event_id: outside_window
+            session_id: s_outside
+            user_id: u3
+            game_id: g3
+            event_name: store_page_view
+            occurred_at: "2024-01-01 00:00:00"
+            recorded_at: "2024-05-20 00:00:00"
+            is_deleted: false
+      - input: ref('dim_users')
+        rows:
+          - { user_id: 'u1' }
+      - input: this
+        rows:
+          - recorded_at: "2024-06-15 00:00:00"
+    expect:
+      rows:
+        - session_id: s_inside
+          recorded_at: "2024-06-10 00:00:00"
+          has_reached_store_page_view: true
+          is_deleted: false
+        - session_id: s_cutoff
+          recorded_at: "2024-06-01 00:00:00"
+          has_reached_store_page_view: true
+          is_deleted: false
+
+  - name: test_fct_product_funnel_sessions_reaggregates_full_session_history
+    description: >
+      Code review finding on the original #135 diff: filtering individual
+      client_events rows by recorded_at and aggregating only the
+      surviving subset (the naive copy of fct_playtime_sessions'/
+      fct_concurrent_player_snapshots' 1-row-per-source-id shape) would
+      silently regress an already-recorded stage once an earlier event
+      ages out of the window - the merge replaces the whole session row,
+      so a partial recompute permanently erases prior history. Session
+      s1 here has a store_page_view event old enough to sit outside the
+      lookback window on its own, and a game_page_view event recent
+      enough to fall inside it - proving the model re-aggregates the
+      session's complete event history (both stages) rather than just
+      the in-window slice.
+    model: fct_product_funnel_sessions
+    overrides:
+      macros:
+        is_incremental: true
+    given:
+      - input: ref('stg_steam__client_events')
+        rows:
+          - event_id: "11111111-1111-1111-1111-111111111111"
+            session_id: "s1"
+            user_id: "u1"
+            game_id: "g1"
+            event_name: "store_page_view"
+            occurred_at: "2024-01-01T00:00:00"
+            recorded_at: "2024-01-01T00:05:00"
+            is_deleted: false
+          - event_id: "22222222-2222-2222-2222-222222222222"
+            session_id: "s1"
+            user_id: "u1"
+            game_id: "g1"
+            event_name: "game_page_view"
+            occurred_at: "2024-06-13T00:00:00"
+            recorded_at: "2024-06-13T00:05:00"
+            is_deleted: false
+      - input: ref('dim_users')
+        rows:
+          - { user_id: 'u1' }
+      - input: this
+        rows:
+          - recorded_at: "2024-06-15T00:00:00"
+    expect:
+      rows:
+        - session_id: "s1"
+          has_reached_store_page_view: true
+          has_reached_game_page_view: true
+          is_deleted: false
+
+  - name: test_fct_product_funnel_sessions_orphan_resolves_to_unknown_member
+    description: >
+      A client_events.user_id with no matching dim_users row (steam-infra
+      #140's dropped FK) resolves to the unknown-member sentinel rather
+      than being dropped by the join (steam-infra #141). Runs against the
+      non-incremental branch (#135 made this model incremental; this
+      isn't exercising the lookback filter).
+    model: fct_product_funnel_sessions
+    overrides:
+      macros:
+        is_incremental: false
+    given:
+      - input: ref('stg_steam__client_events')
+        rows:
+          - event_id: "33333333-3333-3333-3333-333333333333"
+            session_id: "s3"
+            user_id: "orphan_user"
+            game_id: "g1"
+            event_name: "store_page_view"
+            occurred_at: "2024-01-01T00:00:00"
+            is_deleted: false
+      - input: ref('dim_users')
+        rows:
+          - user_id: "some_other_user"
+    expect:
+      rows:
+        - session_id: "s3"
+          user_id: "orphan_user"
+          resolved_user_id: "unknown_member"
+
+  - name: test_fct_product_funnel_sessions_late_arriving_parent_attaches
+    description: >
+      Once the late-arriving parent user row has landed in dim_users
+      (steam-infra #140's other orphan flavour), the session's events
+      resolve to that real user, not the unknown-member sentinel. Runs
+      against the non-incremental branch (#135 made this model
+      incremental; this isn't exercising the lookback filter).
+    model: fct_product_funnel_sessions
+    overrides:
+      macros:
+        is_incremental: false
+    given:
+      - input: ref('stg_steam__client_events')
+        rows:
+          - event_id: "44444444-4444-4444-4444-444444444444"
+            session_id: "s4"
+            user_id: "late_user"
+            game_id: "g1"
+            event_name: "store_page_view"
+            occurred_at: "2024-01-01T00:00:00"
+            is_deleted: false
+      - input: ref('dim_users')
+        rows:
+          - user_id: "late_user"
+    expect:
+      rows:
+        - session_id: "s4"
+          user_id: "late_user"
+          resolved_user_id: "late_user"
+
+  - name: test_stg_steam__client_events_backfills_deleted_tombstone
+    description: >
+      steam-infra#129 integration review, finding 6: a rewrite-mode CDC
+      delete tombstone for client_events is PK-only (event_id plus
+      __deleted=true) - every other column, session_id included, is null
+      in the raw landing row. client_events is insert-once/delete-only, so
+      the tombstone is backfilled from its own prior (pre-delete) row
+      before the offset-dedupe collapses the pair to one, rather than
+      landing in stg_steam__client_events with its session_id lost.
+      Without this, a hard-deleted event can never be attributed back to
+      its funnel session - see
+      test_fct_product_funnel_sessions_revisits_fully_deleted_session for
+      the consumer-side proof this backfill unblocks.
+    model: stg_steam__client_events
+    given:
+      - input: source('steam', 'client_events')
+        rows:
+          - event_id: "e1"
+            user_id: "u1"
+            session_id: "s1"
+            game_id: "g1"
+            event_name: "store_page_view"
+            occurred_at: "2024-01-01 00:00:00"
+            recorded_at: "2024-01-01 00:05:00"
+            __deleted: false
+            record_metadata: { offset: 1 }
+          - event_id: "e1"
+            user_id: null
+            session_id: null
+            game_id: null
+            event_name: null
+            occurred_at: null
+            recorded_at: null
+            __deleted: true
+            record_metadata: { offset: 2 }
+    expect:
+      rows:
+        - event_id: "e1"
+          user_id: "u1"
+          session_id: "s1"
+          game_id: "g1"
+          event_name: "store_page_view"
+          occurred_at: "2024-01-01 00:00:00"
+          recorded_at: "2024-01-01 00:05:00"
+          is_deleted: true
+
+  - name: test_fct_product_funnel_sessions_revisits_fully_deleted_session
+    description: >
+      steam-infra#129 integration review, finding 6, consumer-side proof:
+      once stg_steam__client_events backfills a delete tombstone's
+      session_id (see test_stg_steam__client_events_backfills_deleted_
+      tombstone), a session every one of whose events was just hard-
+      deleted has a real session_id and a real recorded_at to carry
+      through - incremental_lookback_filter()'s is_deleted branch (fix 2)
+      then lets it into touched_sessions regardless of how old that
+      recorded_at is, so the merge revisits the session and flips
+      is_deleted to true instead of leaving it indefinitely live.
+    model: fct_product_funnel_sessions
+    overrides:
+      macros:
+        is_incremental: true
+    given:
+      - input: ref('stg_steam__client_events')
+        rows:
+          - event_id: fully_deleted
+            session_id: s_erased
+            user_id: u1
+            game_id: g1
+            event_name: store_page_view
+            occurred_at: "2024-01-01 00:00:00"
+            recorded_at: "2024-01-01 00:05:00"
+            is_deleted: true
+      - input: ref('dim_users')
+        rows:
+          - user_id: u1
+      - input: this
+        rows:
+          - recorded_at: "2024-06-15 00:00:00"
+    expect:
+      rows:
+        - session_id: s_erased
+          is_deleted: true
+          has_reached_store_page_view: false

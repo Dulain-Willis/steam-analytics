@@ -12,9 +12,37 @@ profile: 'steam_analytics'
 # dim_date's active window (see CONTEXT.md). Static bounds covering the
 # synthetic data's expected range; override via --vars if the data window
 # shifts.
+#
+# arrival_lookback_days: how far back an incremental merge model rescans by
+# arrival timestamp (recorded_at) on every run, so a late-arriving or
+# restated row still lands within the window that re-included it. See
+# CONTEXT.md's "lookback window" glossary entry for why 14 and not #136's
+# 7-day arrival tail directly.
 vars:
   dim_date_start_date: '2023-01-01'
   dim_date_end_date: '2027-01-01'
+  arrival_lookback_days: 14
+  # Project-wide default time_bucket for every elementary volume_anomalies /
+  # freshness_anomalies test (steam-infra #145). Every one of those tests
+  # omits its own time_bucket argument on purpose, relying on elementary's
+  # argument-then-var fallback (get_test_argument) to pick this up - hourly
+  # buckets, so a baseline accumulates in hours of generator traffic rather
+  # than days. One place to change the granularity for all ~40 tests at
+  # once instead of editing each test's yml. (severity has no such project-
+  # level fallback - elementary's test config scoping doesn't route through
+  # package-scoped dbt_project.yml test config, confirmed empirically - so
+  # severity: warn stays explicit on every test.)
+  time_bucket: { period: hour, count: 1 }
+  # Never score the bucket that is still filling. Without this, every
+  # volume_anomalies test compares the partially-elapsed current hour against
+  # completed hours and reports the shortfall as a volume collapse. Observed
+  # on the #129 bring-up: at DEFAULT generator rates, with the stack ~65
+  # minutes old, 18 of the volume tests fired purely because the in-progress
+  # hour was half over -- exactly the baseline noise #145's own acceptance
+  # criteria forbid. Excluding the most recent bucket is the standard
+  # configuration for a reason, and it is set project-wide here for the same
+  # reason time_bucket is: one place, all ~40 tests.
+  detection_delay: { period: hour, count: 1 }
 
 seeds:
   steam_analytics:

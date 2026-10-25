@@ -3,96 +3,343 @@ version: 2
 models:
   - name: stg_steam__users
     description: One row per user. Type-1, latest attributes only.
+    # No recorded_at on this table (low-frequency reference data) - volume
+    # only, keyed on the column that actually changes, created_at.
+    # No volume_anomalies here on purpose. This table is bulk-loaded once by
+    # seed.py at bring-up and barely changes after, so every row shares the
+    # seed timestamp: the test flags that single bucket and then has nothing
+    # to compare against. Verified on the #129 bring-up -- it fired at DEFAULT
+    # generator rates, which is exactly the baseline noise #145 must not
+    # produce. "How many rows arrived this period" is a question about an
+    # append-heavy event stream; for type-1 reference data loaded in bulk the
+    # useful signal is fct_row_counts, which already tracks it.
     columns:
       - name: user_id
         tests: [unique, not_null]
 
   - name: stg_steam__games
     description: One row per game. Type-1, latest attributes only.
+    # No freshness_anomalies here either, same reason as stg_steam__users
+    # above: low-frequency reference data, no recorded_at.
+    # No volume_anomalies here on purpose. This table is bulk-loaded once by
+    # seed.py at bring-up and barely changes after, so every row shares the
+    # seed timestamp: the test flags that single bucket and then has nothing
+    # to compare against. Verified on the #129 bring-up -- it fired at DEFAULT
+    # generator rates, which is exactly the baseline noise #145 must not
+    # produce. "How many rows arrived this period" is a question about an
+    # append-heavy event stream; for type-1 reference data loaded in bulk the
+    # useful signal is fct_row_counts, which already tracks it.
     columns:
       - name: game_id
         tests: [unique, not_null]
 
   - name: stg_steam__game_prices
     description: One row per (game, region) current price.
+    # Same reason as stg_steam__users - no freshness_anomalies.
+    # No volume_anomalies here on purpose. This table is bulk-loaded once by
+    # seed.py at bring-up and barely changes after, so every row shares the
+    # seed timestamp: the test flags that single bucket and then has nothing
+    # to compare against. Verified on the #129 bring-up -- it fired at DEFAULT
+    # generator rates, which is exactly the baseline noise #145 must not
+    # produce. "How many rows arrived this period" is a question about an
+    # append-heavy event stream; for type-1 reference data loaded in bulk the
+    # useful signal is fct_row_counts, which already tracks it.
     columns:
       - name: game_price_id
         tests: [unique, not_null]
 
   - name: stg_steam__marketing_campaigns
     description: One row per marketing campaign.
+    # Same reason as stg_steam__users - no freshness_anomalies.
+    # No volume_anomalies here on purpose. This table is bulk-loaded once by
+    # seed.py at bring-up and barely changes after, so every row shares the
+    # seed timestamp: the test flags that single bucket and then has nothing
+    # to compare against. Verified on the #129 bring-up -- it fired at DEFAULT
+    # generator rates, which is exactly the baseline noise #145 must not
+    # produce. "How many rows arrived this period" is a question about an
+    # append-heavy event stream; for type-1 reference data loaded in bulk the
+    # useful signal is fct_row_counts, which already tracks it.
     columns:
       - name: marketing_campaign_id
         tests: [unique, not_null]
 
   - name: stg_steam__purchases
     description: One row per purchase.
+    # recorded_at is arrival time, not purchased_at's event time - the
+    # anomaly tests below watch arrival volume/cadence, complementing (not
+    # duplicating) the fixed-threshold source freshness check on this same
+    # table (see CONTEXT.md, Pipeline Health).
+    tests:
+      - elementary.volume_anomalies:
+          arguments:
+            timestamp_column: recorded_at
+          config:
+            severity: warn
+      - elementary.freshness_anomalies:
+          arguments:
+            timestamp_column: recorded_at
+          config:
+            severity: warn
     columns:
       - name: purchase_id
         tests: [unique, not_null]
+      - name: purchased_at
+        description: >
+          Not-null guard for the business-key dedupe above (#133) -- SQL's
+          qualify row_number() treats NULL = NULL as a match, so a null
+          purchased_at would silently merge unrelated purchases into the
+          same dedupe partition instead of failing loudly. Not-null at the
+          OLTP source (db/schema.sql); this test catches CDC/schema drift
+          that would otherwise defeat it.
+        tests: [not_null]
 
   - name: stg_steam__ownership_grants
     description: One row per ownership grant (purchase, gift, or key redemption).
+    tests:
+      - elementary.volume_anomalies:
+          arguments:
+            timestamp_column: recorded_at
+          config:
+            severity: warn
+      - elementary.freshness_anomalies:
+          arguments:
+            timestamp_column: recorded_at
+          config:
+            severity: warn
     columns:
       - name: ownership_grant_id
         tests: [unique, not_null]
 
   - name: stg_steam__gifts
     description: One row per gift.
+    tests:
+      - elementary.volume_anomalies:
+          arguments:
+            timestamp_column: recorded_at
+          config:
+            severity: warn
+      - elementary.freshness_anomalies:
+          arguments:
+            timestamp_column: recorded_at
+          config:
+            severity: warn
     columns:
       - name: gift_id
         tests: [unique, not_null]
 
   - name: stg_steam__key_redemptions
     description: One row per key redemption.
+    tests:
+      - elementary.volume_anomalies:
+          arguments:
+            timestamp_column: recorded_at
+          config:
+            severity: warn
+      - elementary.freshness_anomalies:
+          arguments:
+            timestamp_column: recorded_at
+          config:
+            severity: warn
     columns:
       - name: key_redemption_id
         tests: [unique, not_null]
 
   - name: stg_steam__refunds
     description: One row per refund.
+    tests:
+      - elementary.volume_anomalies:
+          arguments:
+            timestamp_column: recorded_at
+          config:
+            severity: warn
+      - elementary.freshness_anomalies:
+          arguments:
+            timestamp_column: recorded_at
+          config:
+            severity: warn
     columns:
       - name: refund_id
         tests: [unique, not_null]
 
   - name: stg_steam__family_shares
     description: One row per family share.
+    tests:
+      - elementary.volume_anomalies:
+          arguments:
+            timestamp_column: recorded_at
+          config:
+            severity: warn
+      - elementary.freshness_anomalies:
+          arguments:
+            timestamp_column: recorded_at
+          config:
+            severity: warn
     columns:
       - name: family_share_id
         tests: [unique, not_null]
 
   - name: stg_steam__wishlist_items
     description: One row per wishlist add.
+    tests:
+      - elementary.volume_anomalies:
+          arguments:
+            timestamp_column: recorded_at
+          config:
+            severity: warn
+      - elementary.freshness_anomalies:
+          arguments:
+            timestamp_column: recorded_at
+          config:
+            severity: warn
     columns:
       - name: wishlist_item_id
         tests: [unique, not_null]
 
   - name: stg_steam__playtime_sessions
     description: One row per playtime session.
+    tests:
+      - elementary.volume_anomalies:
+          arguments:
+            timestamp_column: recorded_at
+          config:
+            severity: warn
+      - elementary.freshness_anomalies:
+          arguments:
+            timestamp_column: recorded_at
+          config:
+            severity: warn
     columns:
       - name: playtime_session_id
         tests: [unique, not_null]
 
   - name: stg_steam__reviews
     description: One row per review.
+    tests:
+      - elementary.volume_anomalies:
+          arguments:
+            timestamp_column: recorded_at
+          config:
+            severity: warn
+      - elementary.freshness_anomalies:
+          arguments:
+            timestamp_column: recorded_at
+          config:
+            severity: warn
     columns:
       - name: review_id
         tests: [unique, not_null]
 
   - name: stg_steam__price_changes
     description: One row per price change event, replayed into dim_game_prices.
+    tests:
+      - elementary.volume_anomalies:
+          arguments:
+            timestamp_column: recorded_at
+          config:
+            severity: warn
+      - elementary.freshness_anomalies:
+          arguments:
+            timestamp_column: recorded_at
+          config:
+            severity: warn
     columns:
       - name: price_change_id
         tests: [unique, not_null]
 
   - name: stg_steam__concurrent_player_snapshots
     description: One row per game per concurrent-player snapshot.
+    tests:
+      - elementary.volume_anomalies:
+          arguments:
+            timestamp_column: recorded_at
+          config:
+            severity: warn
+      - elementary.freshness_anomalies:
+          arguments:
+            timestamp_column: recorded_at
+          config:
+            severity: warn
     columns:
       - name: concurrent_player_snapshot_id
         tests: [unique, not_null]
 
   - name: stg_steam__client_events
     description: One row per client-side funnel event.
+    tests:
+      - elementary.volume_anomalies:
+          arguments:
+            timestamp_column: recorded_at
+          config:
+            severity: warn
+      - elementary.freshness_anomalies:
+          arguments:
+            timestamp_column: recorded_at
+          config:
+            severity: warn
     columns:
       - name: event_id
         tests: [unique, not_null]
+
+unit_tests:
+  - name: test_stg_steam__purchases_collapses_a_business_key_duplicate
+    description: >
+      #133: a double-submitted purchase lands in the landing table as two
+      rows sharing (user_id, game_id, purchased_at) with distinct ids and
+      Kafka offsets. Business-key dedupe must collapse the pair to the
+      single highest-offset row, proving the model-boundary behavior the
+      offline unit tests can't reach through generator/Postgres/CDC.
+    model: stg_steam__purchases
+    given:
+      - input: source('steam', 'purchases')
+        rows:
+          - id: purchase-a
+            user_id: user-1
+            game_id: game-1
+            amount_cents: 1999
+            currency: USD
+            payment_method: credit_card
+            purchased_at: "2026-01-01 00:00:00"
+            recorded_at: "2026-01-01 00:00:05"
+            __deleted: false
+            record_metadata: { offset: 1 }
+          - id: purchase-a-dup
+            user_id: user-1
+            game_id: game-1
+            amount_cents: 1999
+            currency: USD
+            payment_method: credit_card
+            purchased_at: "2026-01-01 00:00:00"
+            recorded_at: "2026-01-01 00:00:05"
+            __deleted: false
+            record_metadata: { offset: 2 }
+          # unrelated purchase: must survive dedupe untouched.
+          - id: purchase-b
+            user_id: user-2
+            game_id: game-2
+            amount_cents: 2999
+            currency: USD
+            payment_method: paypal
+            purchased_at: "2026-01-02 00:00:00"
+            recorded_at: "2026-01-02 00:00:05"
+            __deleted: false
+            record_metadata: { offset: 3 }
+    expect:
+      rows:
+        - purchase_id: purchase-a-dup
+          user_id: user-1
+          game_id: game-1
+          amount_cents: 1999
+          currency: USD
+          payment_method: credit_card
+          purchased_at: "2026-01-01 00:00:00"
+          recorded_at: "2026-01-01 00:00:05"
+          is_deleted: false
+        - purchase_id: purchase-b
+          user_id: user-2
+          game_id: game-2
+          amount_cents: 2999
+          currency: USD
+          payment_method: paypal
+          purchased_at: "2026-01-02 00:00:00"
+          recorded_at: "2026-01-02 00:00:05"
+          is_deleted: false

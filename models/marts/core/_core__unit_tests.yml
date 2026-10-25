@@ -1,0 +1,439 @@
+version: 2
+
+# Model-boundary dbt unit tests (fixture rows in, expected rows out, no
+# warehouse data). First use of dbt's native `unit_tests:` block in this
+# project (see CONTEXT.md's "lookback window" glossary entry and
+# analytics.md) - #133/#136/#138/#139/#141/#143/#144 all reuse this exact
+# shape. Pattern notes for the next ticket to copy this:
+#
+# - Keep each unit test in this file, not inline in _core__models.yml, so
+#   schema tests (generic column tests) and unit tests (fixture-based model
+#   tests) don't crowd the same file.
+# - A unit test against an incremental model MUST set
+#   `overrides.macros.is_incremental` (true or false) - dbt's parser raises
+#   otherwise. When true, it MUST also give a `this` input, since the
+#   model's incremental filter queries `{{ this }}` for the prior high-water
+#   mark.
+# - Unit tests run actual SQL against the configured adapter - they are not
+#   a pure-local check. `dbt parse` only proves the test is structurally
+#   valid (resolves, overrides present, columns line up); running it for
+#   real needs a live target (see live/134.md).
+
+unit_tests:
+  - name: test_fct_purchases_incremental_lookback_window
+    description: >
+      On an incremental run, a row whose recorded_at (arrival timestamp) is
+      within arrival_lookback_days of the table's current max(recorded_at)
+      is rescanned; a row older than the window is left alone. Proves the
+      filter guards on recorded_at, not purchased_at (event timestamp) -
+      every fixture row's purchased_at is held fixed while recorded_at
+      moves, and only recorded_at decides inclusion. deleted_tombstone is
+      the PK-only row shape a CDC hard delete (or #143 compliance erasure)
+      actually produces - every column but the primary key and is_deleted
+      arrives as its type default (verified live: epoch timestamps, empty
+      strings), recorded_at included, so it can never fall "inside" a
+      recorded_at-based window on its own merits. Proves is_deleted lets it
+      through regardless (steam-infra#129 integration review, finding 2).
+    model: fct_purchases
+    overrides:
+      macros:
+        is_incremental: true
+    given:
+      - input: ref('int_purchases_with_fx')
+        rows:
+          - purchase_key: inside_window
+            user_key: u1
+            game_key: g1
+            purchased_at: "2024-01-01 00:00:00"
+            purchase_date: "2024-01-01"
+            recorded_at: "2024-06-10 00:00:00"
+            amount_cents: 1000
+            currency: USD
+            amount_usd: 10.0
+            payment_method: card
+            is_deleted: false
+          - purchase_key: at_cutoff
+            user_key: u2
+            game_key: g2
+            purchased_at: "2024-01-01 00:00:00"
+            purchase_date: "2024-01-01"
+            recorded_at: "2024-06-01 00:00:00"
+            amount_cents: 2000
+            currency: USD
+            amount_usd: 20.0
+            payment_method: card
+            is_deleted: false
+          - purchase_key: outside_window
+            user_key: u3
+            game_key: g3
+            purchased_at: "2024-01-01 00:00:00"
+            purchase_date: "2024-01-01"
+            recorded_at: "2024-05-20 00:00:00"
+            amount_cents: 3000
+            currency: USD
+            amount_usd: 30.0
+            payment_method: card
+            is_deleted: false
+          # PK-only CDC delete tombstone: every column but purchase_key and
+          # is_deleted is null, recorded_at included.
+          - purchase_key: deleted_tombstone
+            user_key: ""
+            game_key: ""
+            purchased_at: "1970-01-01 00:00:00"
+            purchase_date: "1970-01-01"
+            recorded_at: "1970-01-01 00:00:00"
+            amount_cents: 0
+            currency: ""
+            amount_usd: 0.0
+            payment_method: ""
+            is_deleted: true
+      - input: this
+        rows:
+          - recorded_at: "2024-06-15 00:00:00"
+    expect:
+      rows:
+        - purchase_key: inside_window
+          user_key: u1
+          game_key: g1
+          purchased_at: "2024-01-01 00:00:00"
+          purchase_date: "2024-01-01"
+          recorded_at: "2024-06-10 00:00:00"
+          amount_cents: 1000
+          currency: USD
+          amount_usd: 10.0
+          payment_method: card
+        - purchase_key: at_cutoff
+          user_key: u2
+          game_key: g2
+          purchased_at: "2024-01-01 00:00:00"
+          purchase_date: "2024-01-01"
+          recorded_at: "2024-06-01 00:00:00"
+          amount_cents: 2000
+          currency: USD
+          amount_usd: 20.0
+          payment_method: card
+        - purchase_key: deleted_tombstone
+          user_key: ""
+          game_key: ""
+          purchased_at: "1970-01-01 00:00:00"
+          purchase_date: "1970-01-01"
+          recorded_at: "1970-01-01 00:00:00"
+          amount_cents: 0
+          currency: ""
+          amount_usd: 0.0
+          payment_method: ""
+
+  - name: test_fct_ownership_grants_incremental_lookback_window
+    description: >
+      Same proof as test_fct_purchases_incremental_lookback_window, for
+      fct_ownership_grants: the filter guards on recorded_at (arrival
+      timestamp), not granted_at (event timestamp) - every fixture row's
+      granted_at is held fixed while recorded_at moves. deleted_tombstone
+      is the PK-only row shape a CDC hard delete actually produces (every
+      column but the primary key and is_deleted is null) - proves
+      is_deleted lets it through regardless of recorded_at.
+    model: fct_ownership_grants
+    overrides:
+      macros:
+        is_incremental: true
+    given:
+      - input: ref('stg_steam__ownership_grants')
+        rows:
+          - ownership_grant_id: inside_window
+            user_id: u1
+            game_id: g1
+            source: purchase
+            source_id: p1
+            granted_at: "2024-01-01 00:00:00"
+            revoked_at: null
+            recorded_at: "2024-06-10 00:00:00"
+            is_deleted: false
+          - ownership_grant_id: at_cutoff
+            user_id: u2
+            game_id: g2
+            source: gift
+            source_id: p2
+            granted_at: "2024-01-01 00:00:00"
+            revoked_at: null
+            recorded_at: "2024-06-01 00:00:00"
+            is_deleted: false
+          - ownership_grant_id: outside_window
+            user_id: u3
+            game_id: g3
+            source: key_redemption
+            source_id: p3
+            granted_at: "2024-01-01 00:00:00"
+            revoked_at: null
+            recorded_at: "2024-05-20 00:00:00"
+            is_deleted: false
+          # PK-only CDC delete tombstone: every column but
+          # ownership_grant_id and is_deleted is null, recorded_at included.
+          - ownership_grant_id: deleted_tombstone
+            user_id: ""
+            game_id: ""
+            source: ""
+            source_id: ""
+            granted_at: "1970-01-01 00:00:00"
+            revoked_at: ""
+            recorded_at: "1970-01-01 00:00:00"
+            is_deleted: true
+      - input: this
+        rows:
+          - recorded_at: "2024-06-15 00:00:00"
+    expect:
+      # user_key/game_key are surrogate hashes computed inside this model,
+      # not passed through from a fixture, so the comparison is scoped to
+      # the columns below. Every expect row must declare the SAME columns --
+      # dbt unions them, so a differing column set is a compilation error.
+      # The tombstone is identified by is_deleted plus its type-default
+      # values, which is what a CDC delete actually delivers.
+      rows:
+        - source: purchase
+          granted_at: "2024-01-01 00:00:00"
+          revoked_at: null
+          recorded_at: "2024-06-10 00:00:00"
+          is_deleted: false
+        - source: gift
+          granted_at: "2024-01-01 00:00:00"
+          revoked_at: null
+          recorded_at: "2024-06-01 00:00:00"
+          is_deleted: false
+        - source: ""
+          granted_at: "1970-01-01 00:00:00"
+          revoked_at: null
+          recorded_at: "1970-01-01 00:00:00"
+          is_deleted: true
+
+  - name: test_stg_steam__ownership_grants_restated_row_replaces_prior_version
+    description: >
+      steam-infra#138: a backdated correction (reversing a historical
+      refund) lands in the append-only landing table as a second row for
+      the same id at a higher CDC offset, granted_at held fixed. The
+      existing PK-offset dedupe (no new mechanism) must collapse the pair
+      to the single highest-offset row carrying the restated revoked_at
+      and the bumped recorded_at - proving a restatement replaces rather
+      than duplicates, the same way it already does for a literal
+      duplicate insert. An unrelated grant passes through untouched.
+    model: stg_steam__ownership_grants
+    given:
+      - input: source('steam', 'ownership_grants')
+        rows:
+          - id: grant-1
+            user_id: u1
+            game_id: g1
+            source: purchase
+            source_id: p1
+            granted_at: "2024-01-01 00:00:00"
+            revoked_at: "2024-02-01 00:00:00"
+            recorded_at: "2024-02-01 00:00:05"
+            __deleted: false
+            record_metadata: { offset: 1 }
+          - id: grant-1
+            user_id: u1
+            game_id: g1
+            source: purchase
+            source_id: p1
+            granted_at: "2024-01-01 00:00:00"
+            revoked_at: null
+            recorded_at: "2024-06-10 00:00:00"
+            __deleted: false
+            record_metadata: { offset: 2 }
+          # unrelated grant: must survive the dedupe untouched.
+          - id: grant-2
+            user_id: u2
+            game_id: g2
+            source: gift
+            source_id: p2
+            granted_at: "2024-03-01 00:00:00"
+            revoked_at: null
+            recorded_at: "2024-03-01 00:00:05"
+            __deleted: false
+            record_metadata: { offset: 3 }
+    expect:
+      rows:
+        - ownership_grant_id: grant-1
+          granted_at: "2024-01-01 00:00:00"
+          revoked_at: null
+          recorded_at: "2024-06-10 00:00:00"
+          is_deleted: false
+        - ownership_grant_id: grant-2
+          granted_at: "2024-03-01 00:00:00"
+          revoked_at: null
+          recorded_at: "2024-03-01 00:00:05"
+          is_deleted: false
+
+  - name: test_fct_playtime_sessions_incremental_lookback_window
+    description: >
+      Same proof as test_fct_purchases_incremental_lookback_window, for
+      fct_playtime_sessions (#135): the filter guards on recorded_at
+      (arrival timestamp), not started_at/ended_at (event timestamps) -
+      every fixture row's started_at/ended_at is held fixed while
+      recorded_at moves. deleted_tombstone is the PK-only row shape a CDC
+      hard delete actually produces (every column but the primary key and
+      is_deleted is null) - proves is_deleted lets it through regardless
+      of recorded_at.
+    model: fct_playtime_sessions
+    overrides:
+      macros:
+        is_incremental: true
+    given:
+      - input: ref('stg_steam__playtime_sessions')
+        rows:
+          - playtime_session_id: inside_window
+            user_id: u1
+            game_id: g1
+            started_at: "2024-01-01 00:00:00"
+            ended_at: "2024-01-01 01:00:00"
+            recorded_at: "2024-06-10 00:00:00"
+            is_deleted: false
+          - playtime_session_id: at_cutoff
+            user_id: u2
+            game_id: g2
+            started_at: "2024-01-01 00:00:00"
+            ended_at: "2024-01-01 01:00:00"
+            recorded_at: "2024-06-01 00:00:00"
+            is_deleted: false
+          - playtime_session_id: outside_window
+            user_id: u3
+            game_id: g3
+            started_at: "2024-01-01 00:00:00"
+            ended_at: "2024-01-01 01:00:00"
+            recorded_at: "2024-05-20 00:00:00"
+            is_deleted: false
+          # PK-only CDC delete tombstone: every column but
+          # playtime_session_id and is_deleted is null, recorded_at
+          # included.
+          - playtime_session_id: deleted_tombstone
+            user_id: ""
+            game_id: ""
+            started_at: "1970-01-01 00:00:00"
+            ended_at: "1970-01-01 00:00:00"
+            recorded_at: "1970-01-01 00:00:00"
+            is_deleted: true
+      - input: this
+        rows:
+          - recorded_at: "2024-06-15 00:00:00"
+    expect:
+      # user_key/game_key are surrogate hashes computed inside this model,
+      # not passed through from a fixture, so the comparison is scoped to
+      # the columns below. Every expect row must declare the SAME columns --
+      # dbt unions them, so a row with a different column set is a
+      # compilation error, not a looser assertion. The tombstone is
+      # identified by is_deleted plus its epoch timestamps, which is what a
+      # CDC delete actually delivers (verified live on the #129 bring-up).
+      rows:
+        - started_at: "2024-01-01 00:00:00"
+          recorded_at: "2024-06-10 00:00:00"
+          is_open: false
+          duration_minutes: 60
+          is_deleted: false
+        - started_at: "2024-01-01 00:00:00"
+          recorded_at: "2024-06-01 00:00:00"
+          is_open: false
+          duration_minutes: 60
+          is_deleted: false
+        - started_at: "1970-01-01 00:00:00"
+          recorded_at: "1970-01-01 00:00:00"
+          is_open: false
+          duration_minutes: 0
+          is_deleted: true
+
+  - name: test_fct_concurrent_player_snapshots_incremental_lookback_window
+    description: >
+      Same proof as test_fct_purchases_incremental_lookback_window, for
+      fct_concurrent_player_snapshots (#135): the filter guards on
+      recorded_at (arrival timestamp), not snapshot_at (event timestamp) -
+      every fixture row's snapshot_at is held fixed while recorded_at
+      moves. deleted_tombstone is the PK-only row shape a CDC hard delete
+      actually produces (every column but the primary key and is_deleted
+      is null) - proves is_deleted lets it through regardless of
+      recorded_at.
+    model: fct_concurrent_player_snapshots
+    overrides:
+      macros:
+        is_incremental: true
+    given:
+      - input: ref('stg_steam__concurrent_player_snapshots')
+        rows:
+          - concurrent_player_snapshot_id: inside_window
+            game_id: g1
+            player_count: 100
+            snapshot_at: "2024-01-01 00:00:00"
+            recorded_at: "2024-06-10 00:00:00"
+            is_deleted: false
+          - concurrent_player_snapshot_id: at_cutoff
+            game_id: g2
+            player_count: 200
+            snapshot_at: "2024-01-01 00:00:00"
+            recorded_at: "2024-06-01 00:00:00"
+            is_deleted: false
+          - concurrent_player_snapshot_id: outside_window
+            game_id: g3
+            player_count: 300
+            snapshot_at: "2024-01-01 00:00:00"
+            recorded_at: "2024-05-20 00:00:00"
+            is_deleted: false
+          # PK-only CDC delete tombstone: every column but
+          # concurrent_player_snapshot_id and is_deleted is null,
+          # recorded_at included.
+          - concurrent_player_snapshot_id: deleted_tombstone
+            game_id: ""
+            player_count: 0
+            snapshot_at: "1970-01-01 00:00:00"
+            recorded_at: "1970-01-01 00:00:00"
+            is_deleted: true
+      - input: this
+        rows:
+          - recorded_at: "2024-06-15 00:00:00"
+    expect:
+      # game_key is a surrogate hash computed inside this model, not
+      # passed through from a fixture, so the comparison is scoped to the
+      # columns below. Every expect row must declare the SAME columns --
+      # dbt unions them, so a differing column set is a compilation error.
+      # The tombstone is identified by is_deleted plus its type-default
+      # values, which is what a CDC delete actually delivers.
+      rows:
+        - player_count: 100
+          snapshot_at: "2024-01-01 00:00:00"
+          recorded_at: "2024-06-10 00:00:00"
+          is_deleted: false
+        - player_count: 200
+          snapshot_at: "2024-01-01 00:00:00"
+          recorded_at: "2024-06-01 00:00:00"
+          is_deleted: false
+        - player_count: 0
+          snapshot_at: "1970-01-01 00:00:00"
+          recorded_at: "1970-01-01 00:00:00"
+          is_deleted: true
+
+  - name: test_dim_users_always_has_unknown_member
+    description: >
+      dim_users unions in exactly one unknown-member sentinel row
+      regardless of what stg_steam__users contains (steam-infra #141) -
+      proves the sentinel isn't dependent on any real user data existing.
+      tenure_days is omitted from expect since it's derived from
+      current_date() and not static.
+    model: dim_users
+    given:
+      - input: ref('stg_steam__users')
+        rows:
+          - user_id: u1
+            username: alice
+            email: alice@example.com
+            country: US
+            campaign_id: c1
+            created_at: "2024-01-01 00:00:00"
+            deletion_requested_at: null
+            is_deleted: false
+    expect:
+      rows:
+        - user_id: u1
+          username: alice
+          country: US
+          campaign_id: c1
+          is_unknown_member: false
+        - user_id: unknown_member
+          username: Unknown member
+          country: null
+          campaign_id: null
+          is_unknown_member: true

@@ -13,6 +13,8 @@ concurrent_player_snapshots as (
 
     from {{ ref('fct_concurrent_player_snapshots') }}
 
+    where not is_deleted
+
 ),
 
 platform_totals_per_snapshot as (

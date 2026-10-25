@@ -42,8 +42,13 @@ issue #28; this ADR records the shape it targets.
   `uuid` / `text`.
 - **Dedupe key is the Kafka offset**, read from `RECORD_METADATA` (still written
   under schematization), not `__source_lsn` (which is not per-row monotonic on
-  snapshot events). `snapshot.mode=always` is unchanged, so `stg` models must
-  dedupe on every build.
+  snapshot events). `stg` models dedupe on every build regardless of snapshot
+  mode: a CDC topic carries one message per change over a row's whole life,
+  and the landing table is append-only, so collapsing to the highest offset
+  per primary key is how `stg` gets current state even with no restarts at
+  all. (`steam-infra` later moved `snapshot.mode` to `initial` — see
+  CONTEXT.md's offset-dedupe entry, confirmed live in `steam-infra` #132 —
+  which doesn't change this.)
 - **`schemas.enable=true` roughly 2–10×'s the message size.** Acceptable at this
   project's volume and teardown cadence; revisit if throughput becomes the
   constraint.
