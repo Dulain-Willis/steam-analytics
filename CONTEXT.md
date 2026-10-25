@@ -56,6 +56,19 @@ a synonym is listed as *avoid*, do not drift to it.
   a forced re-snapshot (e.g. connector CR delete/recreate) rather than a
   load-bearing need. Confirmed against the live connector in `steam-infra`
   #132.
+- **business-key dedupe** — a second `stg`-layer dedupe, distinct from offset
+  dedupe above and added for the same reason it's needed: the OLTP charge
+  path is not idempotent, so a double-submitted purchase lands as two rows
+  with *different* primary keys but the same business key (`steam-infra`
+  #133's `DUPLICATE_RATE_PURCHASES`). Offset dedupe can't catch this — it
+  collapses by primary key, and these rows have distinct ones. `stg` instead
+  collapses to the highest-offset row per business key
+  (`user_id, game_id, purchased_at`), bucketed into a **tolerance window**
+  (`date_trunc('minute', recorded_at)`) so two independent purchases that
+  land in the same CDC batch aren't merged just because they happen to share
+  a `purchased_at` second. First landed on `stg_steam__purchases`
+  (`models/staging/steam/stg_steam__purchases.sql`); a later ticket adding a
+  duplicate rate to another transaction table follows the same shape.
 
 ### Incremental loading
 
