@@ -125,14 +125,26 @@ a synonym is listed as *avoid*, do not drift to it.
   the live-stack half — recording a published figure before/after a real
   correction, and confirming a too-old restatement is actually dropped —
   is #138's deferred live verification, see `live/138.md`). **Limitation,
-  reasoned through (not yet exercised live) by #138**: this only holds
+  CONFIRMED LIVE on the #129 bring-up**: this only holds
   while the restated row's bumped `recorded_at` falls inside the
   `lookback window`. A correction applied
   *and landing* more than `arrival_lookback_days` after the table's
   current high-water mark is outside the window the next incremental run
   rescans, so it is silently never picked up — merge-on-unique-key would
   still absorb it correctly if the model ever rescanned that row, but the
-  lookback filter never lets it reach the merge in the first place. No
+  lookback filter never lets it reach the merge in the first place.
+  Measured, not inferred: with the high-water mark at `2026-10-25 22:13`
+  (a 14-day floor of `2026-10-11 22:13`), two restatements of revoked
+  `ownership_grants` rows differing only in arrival time gave
+  `recorded_at = now()` -> present in the fact, and
+  `recorded_at = 2026-09-01` -> absent from the fact, while the staging
+  view showed it correctly and the fact still reported the grant as
+  revoked. Silently, with no error and no retry. Contrast delete
+  propagation, which survives the same filter only because the macro
+  carries an explicit `is_deleted or ...` branch -- a restatement has no
+  equivalent escape hatch. This also means the parent spec's claim that
+  merge plus the window needs "no new handling mechanism" for restatement
+  holds only *inside* the window. No
   code change closes this: it is the same bounded-staleness trade-off the
   window makes for every other case (cheap, bounded rescans vs. unbounded
   full-history rescans on every run), just surfaced here for a
