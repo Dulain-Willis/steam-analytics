@@ -68,9 +68,21 @@ final as (
         started_at::date as started_date,
         recorded_at,
         (ended_at is null) as is_open,
+        -- Pinned to a fixed numeric type on purpose. ended_at is TEXT in the
+        -- landing table (the sink types a nullable timestamp whose first
+        -- observed value is null as TEXT), so the precision Snowflake infers
+        -- for this datediff drifts with the data. On a contract-enforced
+        -- incremental model that drift trips on_schema_change='fail':
+        -- observed live on the #129 bring-up as
+        --   New column types: [{'column_name': 'DURATION_MINUTES',
+        --                       'new_type': 'NUMBER(18,0)'}]
+        -- after the generator was redeployed, with no model change at all.
+        -- Without the cast this model fails intermittently whenever the
+        -- inferred precision moves.
         case
-            when ended_at is not null then datediff('minute', started_at, ended_at)
-        end as duration_minutes,
+            when ended_at is not null
+                then datediff('minute', started_at, ended_at)
+        end::number(18, 0) as duration_minutes,
         is_deleted
 
     from {{ 'within_lookback_window' if is_incremental() else 'playtime_sessions' }}
