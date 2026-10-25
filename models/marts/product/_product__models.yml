@@ -254,6 +254,9 @@ unit_tests:
             occurred_at: "2024-09-01T00:10:00"
             recorded_at: "2024-09-01T00:15:00"
             is_deleted: false
+      - input: ref('dim_users')
+        rows:
+          - { user_id: 'u1' }
     expect:
       rows:
         - session_id: "s1"
@@ -310,6 +313,9 @@ unit_tests:
             occurred_at: "2024-01-01 00:00:00"
             recorded_at: "2024-05-20 00:00:00"
             is_deleted: false
+      - input: ref('dim_users')
+        rows:
+          - { user_id: 'u1' }
       - input: this
         rows:
           - recorded_at: "2024-06-15 00:00:00"
@@ -361,6 +367,9 @@ unit_tests:
             occurred_at: "2024-06-13T00:00:00"
             recorded_at: "2024-06-13T00:05:00"
             is_deleted: false
+      - input: ref('dim_users')
+        rows:
+          - { user_id: 'u1' }
       - input: this
         rows:
           - recorded_at: "2024-06-15T00:00:00"
