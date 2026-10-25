@@ -3,14 +3,28 @@
 -- key is event_id (not id) for this table.
 --
 -- Backfill before the dedupe (steam-infra#129 integration review, finding
--- 6): a rewrite-mode CDC delete tombstone for this table is PK-only
--- (event_id plus __deleted=true) -- every other column, session_id
--- included, is null. client_events rows are insert-once/delete-only (no
--- in-place update path in the generator), so across every CDC row sharing
--- an event_id there is at most one non-null value per column -- backfilling
--- every row, the tombstone included, from that single value is
--- unambiguous. Without this, a hard-deleted event loses session_id and can
--- never be attributed back to the funnel session it belonged to, so
+-- 6): a rewrite-mode CDC delete tombstone for this table carries only the
+-- primary key (event_id) plus __deleted=true. Every other column, session_id
+-- included, arrives as its TYPE DEFAULT, not as null -- verified live on the
+-- #129 bring-up: a deleted row's timestamp column reads
+-- 1970-01-01 00:00:00 and its text columns read '', while `col is null`
+-- returns False for both. The connector sets
+-- transforms.unwrap.replace.null.with.default=false, but the Snowflake sink
+-- runs with schematization enabled and materialises the Connect schema's
+-- defaults anyway, one hop downstream of that setting.
+--
+-- This matters for how you fix anything here: a coalesce()-based backfill
+-- would be a silent no-op against type defaults. `max(col) over (partition
+-- by event_id)` is correct under BOTH semantics, because the sentinel sorts
+-- at the bottom of its type's range and max() ignores nulls -- so the real
+-- pre-delete value wins either way. Do not "simplify" it to coalesce().
+--
+-- client_events rows are insert-once/delete-only (no in-place update path in
+-- the generator), so across every CDC row sharing an event_id there is at
+-- most one real value per column -- backfilling every row, the tombstone
+-- included, from that single value is unambiguous. Without this, a
+-- hard-deleted event loses session_id and can never be attributed back to the
+-- funnel session it belonged to, so
 -- fct_product_funnel_sessions.touched_sessions has no way to revisit a
 -- session every one of whose events was just deleted.
 with
