@@ -30,7 +30,8 @@ unit_tests:
       moves, and only recorded_at decides inclusion. deleted_tombstone is
       the PK-only row shape a CDC hard delete (or #143 compliance erasure)
       actually produces - every column but the primary key and is_deleted
-      is null, recorded_at included, so it can never fall "inside" a
+      arrives as its type default (verified live: epoch timestamps, empty
+      strings), recorded_at included, so it can never fall "inside" a
       recorded_at-based window on its own merits. Proves is_deleted lets it
       through regardless (steam-infra#129 integration review, finding 2).
     model: fct_purchases
@@ -76,6 +77,15 @@ unit_tests:
           # PK-only CDC delete tombstone: every column but purchase_key and
           # is_deleted is null, recorded_at included.
           - purchase_key: deleted_tombstone
+            user_key: ""
+            game_key: ""
+            purchased_at: "1970-01-01 00:00:00"
+            purchase_date: "1970-01-01"
+            recorded_at: "1970-01-01 00:00:00"
+            amount_cents: 0
+            currency: ""
+            amount_usd: 0.0
+            payment_method: ""
             is_deleted: true
       - input: this
         rows:
@@ -103,7 +113,15 @@ unit_tests:
           amount_usd: 20.0
           payment_method: card
         - purchase_key: deleted_tombstone
-          is_deleted: true
+          user_key: ""
+          game_key: ""
+          purchased_at: "1970-01-01 00:00:00"
+          purchase_date: "1970-01-01"
+          recorded_at: "1970-01-01 00:00:00"
+          amount_cents: 0
+          currency: ""
+          amount_usd: 0.0
+          payment_method: ""
 
   - name: test_fct_ownership_grants_incremental_lookback_window
     description: >
@@ -151,6 +169,13 @@ unit_tests:
           # PK-only CDC delete tombstone: every column but
           # ownership_grant_id and is_deleted is null, recorded_at included.
           - ownership_grant_id: deleted_tombstone
+            user_id: ""
+            game_id: ""
+            source: ""
+            source_id: ""
+            granted_at: "1970-01-01 00:00:00"
+            revoked_at: ""
+            recorded_at: "1970-01-01 00:00:00"
             is_deleted: true
       - input: this
         rows:
@@ -158,19 +183,25 @@ unit_tests:
     expect:
       # user_key/game_key are surrogate hashes computed inside this model,
       # not passed through from a fixture, so the comparison is scoped to
-      # the columns below - source (null for the tombstone) distinguishes
-      # the three surviving rows.
+      # the columns below. Every expect row must declare the SAME columns --
+      # dbt unions them, so a differing column set is a compilation error.
+      # The tombstone is identified by is_deleted plus its type-default
+      # values, which is what a CDC delete actually delivers.
       rows:
         - source: purchase
           granted_at: "2024-01-01 00:00:00"
           revoked_at: null
           recorded_at: "2024-06-10 00:00:00"
+          is_deleted: false
         - source: gift
           granted_at: "2024-01-01 00:00:00"
           revoked_at: null
           recorded_at: "2024-06-01 00:00:00"
-        - source: null
-          granted_at: null
+          is_deleted: false
+        - source: ""
+          granted_at: "1970-01-01 00:00:00"
+          revoked_at: null
+          recorded_at: "1970-01-01 00:00:00"
           is_deleted: true
 
   - name: test_stg_steam__ownership_grants_restated_row_replaces_prior_version
@@ -273,6 +304,11 @@ unit_tests:
           # playtime_session_id and is_deleted is null, recorded_at
           # included.
           - playtime_session_id: deleted_tombstone
+            user_id: ""
+            game_id: ""
+            started_at: "1970-01-01 00:00:00"
+            ended_at: "1970-01-01 00:00:00"
+            recorded_at: "1970-01-01 00:00:00"
             is_deleted: true
       - input: this
         rows:
@@ -280,20 +316,27 @@ unit_tests:
     expect:
       # user_key/game_key are surrogate hashes computed inside this model,
       # not passed through from a fixture, so the comparison is scoped to
-      # the columns below - started_at (null for the tombstone)
-      # distinguishes the three surviving rows.
+      # the columns below. Every expect row must declare the SAME columns --
+      # dbt unions them, so a row with a different column set is a
+      # compilation error, not a looser assertion. The tombstone is
+      # identified by is_deleted plus its epoch timestamps, which is what a
+      # CDC delete actually delivers (verified live on the #129 bring-up).
       rows:
         - started_at: "2024-01-01 00:00:00"
           recorded_at: "2024-06-10 00:00:00"
           is_open: false
           duration_minutes: 60
+          is_deleted: false
         - started_at: "2024-01-01 00:00:00"
           recorded_at: "2024-06-01 00:00:00"
           is_open: false
           duration_minutes: 60
-        - started_at: null
+          is_deleted: false
+        - started_at: "1970-01-01 00:00:00"
+          recorded_at: "1970-01-01 00:00:00"
+          is_open: false
+          duration_minutes: 0
           is_deleted: true
-          is_open: true
 
   - name: test_fct_concurrent_player_snapshots_incremental_lookback_window
     description: >
@@ -334,6 +377,10 @@ unit_tests:
           # concurrent_player_snapshot_id and is_deleted is null,
           # recorded_at included.
           - concurrent_player_snapshot_id: deleted_tombstone
+            game_id: ""
+            player_count: 0
+            snapshot_at: "1970-01-01 00:00:00"
+            recorded_at: "1970-01-01 00:00:00"
             is_deleted: true
       - input: this
         rows:
@@ -341,16 +388,22 @@ unit_tests:
     expect:
       # game_key is a surrogate hash computed inside this model, not
       # passed through from a fixture, so the comparison is scoped to the
-      # columns below - player_count (null for the tombstone)
-      # distinguishes the three surviving rows.
+      # columns below. Every expect row must declare the SAME columns --
+      # dbt unions them, so a differing column set is a compilation error.
+      # The tombstone is identified by is_deleted plus its type-default
+      # values, which is what a CDC delete actually delivers.
       rows:
         - player_count: 100
           snapshot_at: "2024-01-01 00:00:00"
           recorded_at: "2024-06-10 00:00:00"
+          is_deleted: false
         - player_count: 200
           snapshot_at: "2024-01-01 00:00:00"
           recorded_at: "2024-06-01 00:00:00"
-        - player_count: null
+          is_deleted: false
+        - player_count: 0
+          snapshot_at: "1970-01-01 00:00:00"
+          recorded_at: "1970-01-01 00:00:00"
           is_deleted: true
 
   - name: test_dim_users_always_has_unknown_member
