@@ -33,6 +33,16 @@ vars:
   # package-scoped dbt_project.yml test config, confirmed empirically - so
   # severity: warn stays explicit on every test.)
   time_bucket: { period: hour, count: 1 }
+  # Never score the bucket that is still filling. Without this, every
+  # volume_anomalies test compares the partially-elapsed current hour against
+  # completed hours and reports the shortfall as a volume collapse. Observed
+  # on the #129 bring-up: at DEFAULT generator rates, with the stack ~65
+  # minutes old, 18 of the volume tests fired purely because the in-progress
+  # hour was half over -- exactly the baseline noise #145's own acceptance
+  # criteria forbid. Excluding the most recent bucket is the standard
+  # configuration for a reason, and it is set project-wide here for the same
+  # reason time_bucket is: one place, all ~40 tests.
+  detection_delay: { period: hour, count: 1 }
 
 seeds:
   steam_analytics:

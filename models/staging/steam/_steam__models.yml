@@ -5,12 +5,14 @@ models:
     description: One row per user. Type-1, latest attributes only.
     # No recorded_at on this table (low-frequency reference data) - volume
     # only, keyed on the column that actually changes, created_at.
-    tests:
-      - elementary.volume_anomalies:
-          arguments:
-            timestamp_column: created_at
-          config:
-            severity: warn
+    # No volume_anomalies here on purpose. This table is bulk-loaded once by
+    # seed.py at bring-up and barely changes after, so every row shares the
+    # seed timestamp: the test flags that single bucket and then has nothing
+    # to compare against. Verified on the #129 bring-up -- it fired at DEFAULT
+    # generator rates, which is exactly the baseline noise #145 must not
+    # produce. "How many rows arrived this period" is a question about an
+    # append-heavy event stream; for type-1 reference data loaded in bulk the
+    # useful signal is fct_row_counts, which already tracks it.
     columns:
       - name: user_id
         tests: [unique, not_null]
@@ -19,12 +21,14 @@ models:
     description: One row per game. Type-1, latest attributes only.
     # No freshness_anomalies here either, same reason as stg_steam__users
     # above: low-frequency reference data, no recorded_at.
-    tests:
-      - elementary.volume_anomalies:
-          arguments:
-            timestamp_column: created_at
-          config:
-            severity: warn
+    # No volume_anomalies here on purpose. This table is bulk-loaded once by
+    # seed.py at bring-up and barely changes after, so every row shares the
+    # seed timestamp: the test flags that single bucket and then has nothing
+    # to compare against. Verified on the #129 bring-up -- it fired at DEFAULT
+    # generator rates, which is exactly the baseline noise #145 must not
+    # produce. "How many rows arrived this period" is a question about an
+    # append-heavy event stream; for type-1 reference data loaded in bulk the
+    # useful signal is fct_row_counts, which already tracks it.
     columns:
       - name: game_id
         tests: [unique, not_null]
@@ -32,12 +36,14 @@ models:
   - name: stg_steam__game_prices
     description: One row per (game, region) current price.
     # Same reason as stg_steam__users - no freshness_anomalies.
-    tests:
-      - elementary.volume_anomalies:
-          arguments:
-            timestamp_column: updated_at
-          config:
-            severity: warn
+    # No volume_anomalies here on purpose. This table is bulk-loaded once by
+    # seed.py at bring-up and barely changes after, so every row shares the
+    # seed timestamp: the test flags that single bucket and then has nothing
+    # to compare against. Verified on the #129 bring-up -- it fired at DEFAULT
+    # generator rates, which is exactly the baseline noise #145 must not
+    # produce. "How many rows arrived this period" is a question about an
+    # append-heavy event stream; for type-1 reference data loaded in bulk the
+    # useful signal is fct_row_counts, which already tracks it.
     columns:
       - name: game_price_id
         tests: [unique, not_null]
@@ -45,12 +51,14 @@ models:
   - name: stg_steam__marketing_campaigns
     description: One row per marketing campaign.
     # Same reason as stg_steam__users - no freshness_anomalies.
-    tests:
-      - elementary.volume_anomalies:
-          arguments:
-            timestamp_column: created_at
-          config:
-            severity: warn
+    # No volume_anomalies here on purpose. This table is bulk-loaded once by
+    # seed.py at bring-up and barely changes after, so every row shares the
+    # seed timestamp: the test flags that single bucket and then has nothing
+    # to compare against. Verified on the #129 bring-up -- it fired at DEFAULT
+    # generator rates, which is exactly the baseline noise #145 must not
+    # produce. "How many rows arrived this period" is a question about an
+    # append-heavy event stream; for type-1 reference data loaded in bulk the
+    # useful signal is fct_row_counts, which already tracks it.
     columns:
       - name: marketing_campaign_id
         tests: [unique, not_null]
